@@ -298,6 +298,10 @@ test('Защита от XSS', async (b) => {
   content.sections[0].bg = 'red;background:url(javascript:alert(1))';
   content.sections[0].goalBg = '#000" onmouseover="window.__xss=7';
   content.hero.cards[0].bg = 'navy" onclick="window.__xss=8';
+  content.sections.find((s) => s.id === 'achievements').items[1].links = [
+    { id: 'x1', label: '<b onmouseover="window.__xss=9">x</b>', href: 'javascript:window.__xss=10' },
+    { id: 'x2', label: 'ok', href: '//evil.example/x' }
+  ];
   const { page, context } = await newPage(b, { content });
   await openSite(page);
   await page.waitForTimeout(500);
@@ -605,6 +609,45 @@ test('Цвета внутренних плашек и карточек', async (
   assert(c[0] === 'rgb(28, 42, 79)' && c[1] === 'rgb(255, 255, 255)', 'фраза: ' + c[0] + ' / ' + c[1]);
   assert(c[2] === 'rgb(85, 34, 68)' && c[3] === 'rgb(255, 255, 255)', 'карточка: ' + c[2] + ' / ' + c[3]);
   assert(c[4] === 'rgb(195, 154, 43)', 'карточка шапки: ' + c[4]);
+  await context.close();
+});
+
+test('Достижения: ссылки на материалы', async (b) => {
+  const { page, context, db } = await newPage(b);
+  await loginOk(page);
+  await menu(page, 'Достижения');
+  await page.click('.item-title:text-is("III место в многоборье")');
+  await page.click('button:has-text("Добавить ссылку")');
+  await page.fill('[data-field="link-label"]', 'Положение о соревнованиях');
+  await page.fill('input[placeholder="https://… или загрузите файл"] >> nth=0', 'https://example.org/polozhenie.pdf');
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  const item = db.content.sections.find((s) => s.id === 'achievements').items.find((i) => i.id === 'ach-mnogoborye');
+  assert(item.links.length === 1 && item.links[0].href === 'https://example.org/polozhenie.pdf', 'ссылка не сохранена');
+
+  const site = await context.newPage();
+  await openSite(site);
+  const links = await site.$$eval('#achievements .ach-actions a', (els) => els.map((a) => [a.textContent, a.getAttribute('href'), a.target]));
+  assert(links.some((l) => l[0] === 'Публикация работы' && l[1].startsWith('https://fond21veka.ru/') && l[2] === '_blank'), 'нет ссылки на публикацию');
+  assert(links.some((l) => l[0] === 'Положение о соревнованиях' && l[1] === 'https://example.org/polozhenie.pdf'), 'нет новой ссылки');
+  await context.close();
+});
+
+test('Обновление проекта: ссылка добавляется к старому достижению без списка ссылок', async (b) => {
+  const content = clone(DEFAULT);
+  const fond = content.sections.find((s) => s.id === 'achievements').items.find((i) => i.id === 'ach-fond21');
+  delete fond.links;
+  fond.text = 'Правка учителя';
+  const { page, context, db } = await newPage(b, { content });
+  await loginOk(page);
+  await page.waitForSelector('.banner:has-text("новые материалы (1)")');
+  assert((await page.textContent('.banner')).includes('Публикация работы'), 'в списке нет ссылки');
+  await page.click('.banner button:has-text("Добавить")');
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  const saved = db.content.sections.find((s) => s.id === 'achievements').items.find((i) => i.id === 'ach-fond21');
+  assert(saved.text === 'Правка учителя', 'правка потеряна');
+  assert(saved.links && saved.links[0].id === 'link-fond21-publication', 'ссылка не добавлена');
   await context.close();
 });
 

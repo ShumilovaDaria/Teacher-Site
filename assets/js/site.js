@@ -17,6 +17,20 @@
     return 'class="' + cls + b.cls + '"' + (b.style ? ' style="' + b.style + '"' : '');
   }
 
+  // Низ карточки достижения: сканы документов и ссылки на материалы
+  function achActions(it, scans, key) {
+    var parts = [];
+    if (scans.length) {
+      parts.push('<button type="button" class="link-btn" data-open="' + key + '" data-index="0">' +
+        (scans.length > 1 ? 'Документы (' + scans.length + ')' : 'Смотреть документ') + '</button>');
+    }
+    visible(it.links).forEach(function (l) {
+      var a = link(l.href, has(l.label) ? l.label : 'Материал', 'link-btn');
+      if (a) parts.push(a);
+    });
+    return parts.length ? '<div class="ach-actions">' + parts.join('') + '</div>' : '';
+  }
+
   function anchorId(id) { return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '') || 'block'; }
 
   function img(media, alt, extraClass) {
@@ -104,8 +118,7 @@
           (has(it.category) ? '<span class="tag t' + (ci < 0 ? 0 : ci % 3) + '">' + esc(it.category) + '</span>' : '') +
           '<h3>' + esc(it.title) + '</h3>' + (has(it.org) ? '<div class="org">' + esc(it.org) + '</div>' : '') +
           (has(it.text) ? '<div class="desc">' + esc(it.text) + '</div>' : '') +
-          (scans.length ? '<button type="button" class="link-btn" data-open="' + key + '" data-index="0">' +
-            (scans.length > 1 ? 'Документы (' + scans.length + ')' : 'Смотреть документ') + '</button>' : '') +
+          achActions(it, scans, key) +
           '</div></article>';
       }).join('') + '</div>';
     },

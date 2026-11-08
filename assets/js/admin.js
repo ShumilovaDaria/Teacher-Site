@@ -905,6 +905,16 @@
           b.appendChild(textField(it, 'title', 'Название', { onInput: upd }));
           b.appendChild(textField(it, 'org', 'Кто наградил, где'));
           b.appendChild(textField(it, 'text', 'Описание', { rows: 3 }));
+          if (!Array.isArray(it.links)) it.links = [];
+          b.appendChild(h('div', { className: 'field' }, [h('span', { text: 'Ссылки на материалы' }), listField(it.links, {
+            prefix: 'lnk', addLabel: 'Добавить ссылку', emptyText: 'Ссылок пока нет. Например: публикация работы, страница конкурса, видео занятия.',
+            title: function (l) { return l.label || l.href; },
+            make: function () { return { label: '', href: '' }; },
+            fields: function (l, body, upd) {
+              body.appendChild(textField(l, 'label', 'Подпись ссылки', { onInput: upd, placeholder: 'например: Публикация работы', name: 'link-label' }));
+              body.appendChild(linkField(l, 'href', 'Адрес или файл', 'Ссылка на страницу (https://…) или загруженный файл PDF, Word, презентация.'));
+            }
+          })]));
           if (!Array.isArray(it.scans)) it.scans = [];
           b.appendChild(mediaField(it.scans, { label: 'Сканы дипломов и грамот', shape: 'wide', allowVideo: false, captions: false }));
           b.appendChild(boxColorField(it, 'bg', 'Цвет этой карточки', cardHex(sec), 'Как у остальных карточек'));
@@ -1206,13 +1216,14 @@
     Object.keys(def).forEach(function (key) {
       var dv = def[key];
       if (Array.isArray(dv) && dv.length && dv[0] && typeof dv[0] === 'object' && 'id' in dv[0]) {
-        if (!Array.isArray(cur[key])) return;
-        var ca = cur[key];
+        // списка ещё нет (например, ссылки у старого достижения): он появится, когда материалы добавят
+        if (cur[key] != null && !Array.isArray(cur[key])) return;
+        var ca = Array.isArray(cur[key]) ? cur[key] : [];
         dv.forEach(function (d, di) {
           var match = ca.find(function (c) { return c && c.id === d.id; });
           if (match) { findNew(d, match, known, out, d.title || d.role || label); return; }
           if (known[d.id]) return;
-          out.push({ arr: ca, item: d, defArr: dv, index: di, where: label, name: d.title || d.role || d.label || (d.type === 'video' ? 'видео' : 'фото') });
+          out.push({ parent: cur, key: key, item: d, defArr: dv, index: di, where: label, name: d.title || d.role || d.label || (d.type === 'video' ? 'видео' : 'фото') });
         });
       } else if (dv && typeof dv === 'object' && !Array.isArray(dv) && cur[key] && typeof cur[key] === 'object') {
         findNew(dv, cur[key], known, out, label);
@@ -1241,14 +1252,16 @@
       h('div', { className: 'row' }, [
         h('button', { type: 'button', className: 'btn primary small', text: 'Добавить', onclick: function () {
           found.forEach(function (f) {
+            if (!Array.isArray(f.parent[f.key])) f.parent[f.key] = [];
+            var arr = f.parent[f.key];
             var prev = f.defArr.slice(0, f.index).reverse();
-            var pos = f.arr.length;
+            var pos = arr.length;
             for (var k = 0; k < prev.length; k++) {
-              var idx = f.arr.findIndex(function (c) { return c && c.id === prev[k].id; });
+              var idx = arr.findIndex(function (c) { return c && c.id === prev[k].id; });
               if (idx >= 0) { pos = idx + 1; break; }
             }
             if (f.index === 0) pos = 0;
-            f.arr.splice(pos, 0, S.clone(f.item));
+            arr.splice(pos, 0, S.clone(f.item));
           });
           remember(); markDirty(); drawMenu(); go(state.current); box.innerHTML = '';
           toast('Добавлено. Нажмите «Сохранить».');

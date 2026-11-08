@@ -190,6 +190,9 @@ button { font: inherit; color: inherit; }
 .ach h3 { margin-top: 12px; font-size: 20px; }
 .ach .org { margin-top: 6px; font-size: 14.5px; font-weight: 700; color: var(--muted); }
 .ach .desc { margin-top: 10px; font-size: 15.5px; }
+.ach-actions { margin-top: auto; padding-top: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; }
+.ach-actions .link-btn { margin-top: 0; padding-top: 0; font-size: 15.5px; }
+a.link-btn { display: inline-block; }
 .link-btn {
   margin-top: auto; padding-top: 14px; align-self: flex-start; background: none; border: 0; padding-left: 0;
   font-weight: 800; color: var(--sky-deep); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
