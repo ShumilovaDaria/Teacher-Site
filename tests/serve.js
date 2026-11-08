@@ -18,6 +18,8 @@ function start(port) {
     const file = path.join(ROOT, p);
     if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
     fs.stat(file, (err, st) => {
+      // как GitHub Pages: папка без слеша перенаправляется на адрес со слешем
+      if (!err && st.isDirectory()) { res.writeHead(301, { Location: p + '/' }); return res.end(); }
       if (err || !st.isFile()) { res.writeHead(404); return res.end('Not found'); }
       const type = TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream';
       const range = req.headers.range && /bytes=(\d*)-(\d*)/.exec(req.headers.range);

@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
+  <script>
+    // Адрес …/admin ведёт сюда же: переходим на …/admin.html
+    if (/\/admin$/.test(location.pathname)) location.replace(location.pathname + '.html' + location.search + location.hash);
+  </script>
   <title>Управление сайтом</title>
   <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="assets/css/fonts.css">
