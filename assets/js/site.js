@@ -373,10 +373,35 @@
       }
     });
 
+    reveal(app);
+
     if (location.hash) {
       var target = document.getElementById(location.hash.slice(1));
       if (target) target.scrollIntoView();
     }
+  }
+
+  // Блоки плавно появляются, когда доходят до экрана
+  var REVEAL = '.hero-grid > *, .hero-card, .section-head, .chips, .albums, .about-text, .about-photo, .card, .tl-item, ' +
+    '.album-text, .media-tile, .empty-album, .remember, .contact, .custom-photo, .note';
+
+  function reveal(root) {
+    if (!('IntersectionObserver' in window)) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var items = root.querySelectorAll(REVEAL);
+    var io = new IntersectionObserver(function (entries) {
+      // элементы, вошедшие в экран одновременно, появляются друг за другом
+      entries.filter(function (e) { return e.isIntersecting; }).forEach(function (e, i) {
+        e.target.style.setProperty('--d', Math.min(i, 5) * 90 + 'ms');
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    Array.prototype.forEach.call(items, function (el) {
+      el.classList.add('rv');
+      io.observe(el);
+    });
+    document.documentElement.classList.add('reveal-on');
   }
 
   S.loadContent().then(function (res) {

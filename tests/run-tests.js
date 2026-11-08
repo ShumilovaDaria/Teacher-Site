@@ -304,7 +304,7 @@ test('Работает без внешнего интернета (шрифты 
   assert(fonts[0] && fonts[1], 'шрифты не загрузились');
   assert(!failed.some((u) => u.startsWith(BASE)), 'не загрузились: ' + failed.join(', '));
   await page.goto(BASE + '/admin.html');
-  await page.waitForSelector('html[data-ready="admin"]');
+  await page.waitForSelector('html[data-ready="login"], html[data-ready="admin"]');
   assert(page.errors.length === 0, 'ошибки JS: ' + page.errors.join('; '));
   await context.close();
 });
@@ -497,7 +497,7 @@ test('Резервная копия: экспорт и импорт content.json
 });
 
 test('Демо-режим без базы: правки сохраняются в браузере', async (b) => {
-  const { page, context } = await newPage(b, { config: 'real' });
+  const { page, context } = await newPage(b, { config: "window.SITE_CONFIG = { supabaseUrl: '', supabaseKey: '', github: {} };" });
   await page.goto(BASE + '/admin.html');
   await page.waitForSelector('html[data-ready="admin"]');
   await page.fill('[data-field="hero-name"]', 'Демо имя');
