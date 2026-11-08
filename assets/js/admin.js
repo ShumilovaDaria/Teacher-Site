@@ -1017,6 +1017,7 @@
       }
     },
     blocks: { title: 'Блоки страницы', draw: drawBlocks },
+    colors: { title: 'Цвета', draw: drawColors },
     seo: {
       title: 'SEO и подвал',
       draw: function (v) {
@@ -1037,6 +1038,44 @@
     var opts = state.data.sections.map(function (s) { return ['#' + s.id, 'Блок «' + s.title + '»']; });
     if (current && !opts.some(function (o) { return o[0] === current; })) opts.unshift([current, current]);
     return opts;
+  }
+
+  // Все цветные блоки сайта на одной странице, в том порядке, в каком они идут на сайте
+  var CARD_DEFAULT_HEX = ['#8cc4ec', '#f5b6c7', '#e9d2aa'];
+  var PER_ITEM_COLOR = { education: 'title', courses: 'title', achievements: 'title', materials: 'title' };
+
+  function drawColors(view) {
+    var hr = state.data.hero;
+    if (!Array.isArray(hr.cards)) hr.cards = [];
+    var v = h('div', { className: 'colors-page' });
+    view.appendChild(v);
+    v.appendChild(h('p', { className: 'muted', text: 'Здесь собраны все цветные блоки сайта по порядку. Кружки: цвета сайта, кружок с косой чертой: исходный цвет. Квадрат открывает палитру с любым цветом, рядом можно вписать код вида #c39a2b. Не забудьте нажать «Сохранить».' }));
+
+    var heroPanel = panel('Шапка', [
+      colorField(hr, 'bg', 'Фон шапки', 'cream', BG_SWATCHES, { name: 'c-hero-bg' }),
+      colorField(hr, 'ringColor', 'Окантовка фото', RING_DEFAULT, RING_SWATCHES, { name: 'c-ring' }),
+      boxColorField(hr, 'epigraphBg', 'Плашка с эпиграфом', '#fffcf6')
+    ]);
+    hr.cards.forEach(function (c, i) {
+      heroPanel.appendChild(boxColorField(c, 'bg', 'Карточка ' + (i + 1) + (c.title ? ': «' + c.title + '»' : ''), CARD_DEFAULT_HEX[i % 3]));
+    });
+    v.appendChild(heroPanel);
+
+    state.data.sections.forEach(function (sec) {
+      var p = panel(sec.title || 'Блок', [colorField(sec, 'bg', 'Фон блока', 'cream', BG_SWATCHES)]);
+      if (sec.hidden) p.querySelector('h2').appendChild(h('span', { className: 'badge', text: 'скрыт', style: 'margin-left:8px' }));
+      if (sec.type === 'about') p.appendChild(boxColorField(sec, 'goalBg', 'Плашка с выделенной фразой', '#f5b6c7'));
+      if (CARD_COLORS[sec.type]) p.appendChild(boxColorField(sec, 'cardBg', CARD_COLORS[sec.type][1], CARD_COLORS[sec.type][0]));
+      if (sec.type === 'materials') p.appendChild(boxColorField(sec, 'rememberBg', 'Памятка «Помните…»', '#1c2a4f'));
+      var items = PER_ITEM_COLOR[sec.type] ? (sec.items || []) : [];
+      if (items.length) {
+        p.appendChild(more(items.map(function (it) {
+          return boxColorField(it, 'bg', 'Карточка «' + (it.title || 'без названия') + '»', cardHex(sec), 'Как у остальных карточек');
+        })));
+        p.lastChild.querySelector('summary').textContent = 'Отдельные карточки (' + items.length + ')';
+      }
+      v.appendChild(p);
+    });
   }
 
   function drawBlocks(v) {
@@ -1240,7 +1279,7 @@
       items.forEach(function (i) { g.appendChild(i); });
       menu.appendChild(g);
     }
-    group('Страница', [item('hero', 'Шапка'), item('blocks', 'Блоки страницы')]);
+    group('Страница', [item('hero', 'Шапка'), item('blocks', 'Блоки страницы'), item('colors', 'Цвета')]);
     group('Содержимое', state.data.sections.map(function (s) { return item('sec:' + s.id, s.title || 'Без названия', s.hidden); }));
     group('Настройки', [item('seo', 'SEO и подвал'), item('backup', 'Копия и пароль')]);
   }

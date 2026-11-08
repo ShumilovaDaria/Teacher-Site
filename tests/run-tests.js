@@ -123,7 +123,7 @@ async function newPage(browser, opts = {}) {
   const context = await browser.newContext({ viewport: opts.viewport || { width: 1280, height: 900 }, acceptDownloads: true, hasTouch: !!opts.hasTouch });
   const mock = mockSupabase(opts);
   if (opts.config !== 'real') {
-    await context.route('**/config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: opts.config || SB_CONFIG }));
+    await context.route(/\/config\.js(\?|$)/, (route) => route.fulfill({ contentType: 'text/javascript', body: opts.config || SB_CONFIG }));
   }
   await context.route(SB + '/**', mock.handler);
   if (opts.offline) {
@@ -605,6 +605,32 @@ test('Цвета внутренних плашек и карточек', async (
   assert(c[0] === 'rgb(28, 42, 79)' && c[1] === 'rgb(255, 255, 255)', 'фраза: ' + c[0] + ' / ' + c[1]);
   assert(c[2] === 'rgb(85, 34, 68)' && c[3] === 'rgb(255, 255, 255)', 'карточка: ' + c[2] + ' / ' + c[3]);
   assert(c[4] === 'rgb(195, 154, 43)', 'карточка шапки: ' + c[4]);
+  await context.close();
+});
+
+test('Страница «Цвета»: все цветные блоки в одном месте', async (b) => {
+  const { page, context, db } = await newPage(b);
+  await loginOk(page);
+  await menu(page, 'Цвета');
+  const panels = await page.$$eval('.view .panel > h2', (els) => els.map((e) => e.firstChild.textContent));
+  assert(panels[0] === 'Шапка' && panels.length === 1 + DEFAULT.sections.length, 'панели: ' + panels.join(', '));
+  const hero = page.locator('.panel:has(> h2:text-is("Шапка"))');
+  assert(await hero.locator('.field > span:text-matches("^Карточка [123]")').count() === 3, 'нет трёх карточек шапки');
+  await hero.locator('.field:has(> span:text-matches("^Карточка 3")) .swatch[title="Тёмно-синий"]').click();
+  await page.locator('.panel:has(> h2:text-is("Обо мне")) .field:has(> span:text-is("Плашка с выделенной фразой")) input[type="color"]').fill('#aa3355');
+  const ach = page.locator('.panel:has(> h2:text-is("Достижения"))');
+  await ach.locator('summary:has-text("Отдельные карточки")').click();
+  await ach.locator('.field:has(> span:text-is("Карточка «III место в многоборье»")) .swatch[title="Золото"]').click();
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  assert(db.content.hero.cards[2].bg === 'navy', 'карточка шапки 3');
+  assert(db.content.sections.find((s) => s.id === 'about').goalBg === '#aa3355', 'плашка «Обо мне»');
+  assert(db.content.sections.find((s) => s.id === 'achievements').items.find((i) => i.id === 'ach-mnogoborye').bg === 'gold', 'карточка достижения');
+  const site = await context.newPage();
+  await openSite(site);
+  const c = await site.evaluate(() => [getComputedStyle(document.querySelectorAll('.hero-card')[2]).backgroundColor,
+    getComputedStyle(document.querySelectorAll('.hero-card')[2].querySelector('h3')).color]);
+  assert(c[0] === 'rgb(28, 42, 79)' && c[1] === 'rgb(255, 255, 255)', 'карточка шапки на сайте ' + c.join(' / '));
   await context.close();
 });
 

@@ -4,7 +4,8 @@
   "description": "Сайт учителя начальных классов: статические файлы, админка, тесты",
   "scripts": {
     "start": "node tests/serve.js 8080",
-    "test": "node tests/run-tests.js"
+    "test": "node tests/run-tests.js",
+    "version": "node tests/bump-version.js"
   },
   "devDependencies": {
     "playwright": "^1.50.0"

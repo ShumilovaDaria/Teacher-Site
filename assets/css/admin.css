@@ -108,6 +108,9 @@ details.more > summary { cursor: pointer; font-weight: 700; color: var(--sky-dee
 .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
 .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
 .swatch:hover { border-color: var(--navy); }
+.colors-page .hint { display: none; }
+.colors-page .field { margin-bottom: 12px; }
+
 /* «как задумано»: исходный цвет с косой чертой */
 .swatch-default { position: relative; overflow: hidden; }
 .swatch-default::after {
