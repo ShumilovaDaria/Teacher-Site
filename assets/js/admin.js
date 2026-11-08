@@ -446,6 +446,17 @@
     ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий'], ['gold', 'Золото']]
     .map(function (b) { return [b[0], S.BOX_PRESETS[b[0]], b[1]]; });
 
+  // Палитра для текста и деталей: цвета сайта, их тёмные оттенки, белый и чёрный
+  var THEME_SWATCHES = [['#1c2a4f', 'Тёмно-синий'], ['#4f5b7a', 'Серо-синий'], ['#3d8bc9', 'Голубой насыщенный'], ['#8cc4ec', 'Небесно-голубой'],
+    ['#d76f8d', 'Розовый насыщенный'], ['#f5b6c7', 'Пудрово-розовый'], ['#e9d2aa', 'Тёплый беж'], ['#c39a2b', 'Золото'],
+    ['#e6c766', 'Светлое золото'], ['#ffffff', 'Белый'], ['#000000', 'Чёрный']].map(function (c) { return [c[0], c[0], c[1]]; });
+
+  // Цвет текста блока; пусто = автоматически (тёмный, а на тёмном фоне белый)
+  function textColorField(obj, label, bg) {
+    var auto = /is-dark/.test(bg.cls) ? '#ffffff' : ((state.data.theme || {}).text || '#1c2a4f');
+    return colorField(obj, 'textColor', label, '', [['', auto, 'Автоматически']].concat(THEME_SWATCHES), { name: 'text-color' });
+  }
+
   // Цвет плашки или карточки; пустое значение = «как задумано» (defaultHex показывает, какой это цвет)
   function boxColorField(obj, key, label, defaultHex, defaultTitle) {
     return colorField(obj, key, label, '', [['', defaultHex, defaultTitle || 'Как задумано']].concat(BOX_SWATCHES), { name: 'box-' + key });
@@ -806,6 +817,7 @@
         menuCheck(sec)
       ]),
       colorField(sec, 'bg', 'Фон блока', 'cream', BG_SWATCHES, { name: 'section-bg' }),
+      textColorField(sec, 'Цвет текста блока', S.bgStyle(sec.bg, 'cream')),
       CARD_COLORS[sec.type] ? boxColorField(sec, 'cardBg', CARD_COLORS[sec.type][1], CARD_COLORS[sec.type][0]) : null
     ];
   }
@@ -1061,8 +1073,20 @@
     view.appendChild(v);
     v.appendChild(h('p', { className: 'muted', text: 'Здесь собраны все цветные блоки сайта по порядку. Кружки: цвета сайта, кружок с косой чертой: исходный цвет. Квадрат открывает палитру с любым цветом, рядом можно вписать код вида #c39a2b. Не забудьте нажать «Сохранить».' }));
 
+    // Текст и мелкие детали всего сайта
+    var theme = state.data.theme = state.data.theme && typeof state.data.theme === 'object' ? state.data.theme : {};
+    var themePanel = panel('Текст и детали', [h('p', { className: 'muted', text: 'Цвета текста, линий, точек, кнопок и меню на всём сайте.' })]);
+    S.THEME.forEach(function (g) {
+      themePanel.appendChild(h('h3', { className: 'colors-sub', text: g[0] }));
+      g[1].forEach(function (t) {
+        themePanel.appendChild(colorField(theme, t[0], t[1], '', [['', t[2], 'Как задумано']].concat(THEME_SWATCHES), { name: 'theme-' + t[0] }));
+      });
+    });
+    v.appendChild(themePanel);
+
     var heroPanel = panel('Шапка', [
       colorField(hr, 'bg', 'Фон шапки', 'cream', BG_SWATCHES, { name: 'c-hero-bg' }),
+      textColorField(hr, 'Цвет текста шапки', S.bgStyle(hr.bg, 'cream')),
       colorField(hr, 'ringColor', 'Окантовка фото', RING_DEFAULT, RING_SWATCHES, { name: 'c-ring' }),
       boxColorField(hr, 'epigraphBg', 'Плашка с эпиграфом', '#fffcf6')
     ]);
@@ -1072,7 +1096,7 @@
     v.appendChild(heroPanel);
 
     state.data.sections.forEach(function (sec) {
-      var p = panel(sec.title || 'Блок', [colorField(sec, 'bg', 'Фон блока', 'cream', BG_SWATCHES)]);
+      var p = panel(sec.title || 'Блок', [colorField(sec, 'bg', 'Фон блока', 'cream', BG_SWATCHES), textColorField(sec, 'Цвет текста блока', S.bgStyle(sec.bg, 'cream'))]);
       if (sec.hidden) p.querySelector('h2').appendChild(h('span', { className: 'badge', text: 'скрыт', style: 'margin-left:8px' }));
       if (sec.type === 'about') p.appendChild(boxColorField(sec, 'goalBg', 'Плашка с выделенной фразой', '#f5b6c7'));
       if (CARD_COLORS[sec.type]) p.appendChild(boxColorField(sec, 'cardBg', CARD_COLORS[sec.type][1], CARD_COLORS[sec.type][0]));

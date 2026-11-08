@@ -31,6 +31,24 @@
     return parts.length ? '<div class="ach-actions">' + parts.join('') + '</div>' : '';
   }
 
+  // Фон блока и цвет его текста: свой цвет из админки, иначе белый на тёмном фоне
+  function blockStyle(bg, textColor) {
+    var parts = [];
+    if (bg.style) parts.push(bg.style);
+    if (S.isHex(textColor)) parts.push('--s-text:' + textColor.toLowerCase());
+    else if (/is-dark/.test(bg.cls)) parts.push('--s-text:#ffffff');
+    return parts.length ? ' style="' + parts.join(';') + '"' : '';
+  }
+
+  // Цвета текста и деталей из админки
+  var themeApplied = [];
+  function applyTheme(theme) {
+    var root = document.documentElement.style;
+    themeApplied.forEach(function (name) { root.removeProperty(name); });
+    themeApplied = [];
+    S.themeVars(theme).forEach(function (v) { root.setProperty(v[0], v[1]); themeApplied.push(v[0]); });
+  }
+
   function anchorId(id) { return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '') || 'block'; }
 
   function img(media, alt, extraClass) {
@@ -217,7 +235,7 @@
     var buttons = visible(h.buttons).map(function (b, i) { return link(b.href, b.label, i === 0 ? 'btn' : 'btn alt'); }).filter(Boolean);
     var cardList = visible(cards).filter(function (c) { return has(c.title) || has(c.text); });
     var bg = S.bgStyle(h.bg, 'cream');
-    return '<header class="hero ' + bg.cls + '"' + (bg.style ? ' style="' + bg.style + '"' : '') + ' id="top"><div class="wrap"><div class="hero-grid"><div>' +
+    return '<header class="hero ' + bg.cls + '"' + blockStyle(bg, h.textColor) + ' id="top"><div class="wrap"><div class="hero-grid"><div>' +
       (has(h.kicker) ? '<div class="hero-kicker">' + esc(h.kicker) + '</div>' : '') +
       '<h1>' + esc(h.name) + '</h1>' +
       (has(h.role) ? '<div class="hero-role">' + esc(h.role) + '</div>' : '') +
@@ -350,7 +368,7 @@
       if (!inner) return;
       var id = anchorId(sec.id);
       var bg = S.bgStyle(sec.bg, i % 2 ? 'beige' : 'cream');
-      blocks.push('<section class="section ' + bg.cls + '"' + (bg.style ? ' style="' + bg.style + '"' : '') + ' id="' + id + '" data-type="' + esc(sec.type) + '"><div class="wrap">' + inner + '</div></section>');
+      blocks.push('<section class="section ' + bg.cls + '"' + blockStyle(bg, sec.textColor) + ' id="' + id + '" data-type="' + esc(sec.type) + '"><div class="wrap">' + inner + '</div></section>');
       if (sec.menu !== false) nav.push('<a href="#' + id + '">' + esc(sec.menuLabel || sec.title) + '</a>');
     });
 
@@ -363,6 +381,7 @@
       '<footer class="footer"><div class="wrap"><span>© ' + year + ' ' + esc(hero.name || '') + '</span><span>' + esc(data.footer || hero.kicker || '') + '</span></div></footer>';
 
     setMeta(data);
+    applyTheme(data.theme);
     bind();
   }
 

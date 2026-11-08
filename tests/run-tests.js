@@ -298,6 +298,8 @@ test('Защита от XSS', async (b) => {
   content.sections[0].bg = 'red;background:url(javascript:alert(1))';
   content.sections[0].goalBg = '#000" onmouseover="window.__xss=7';
   content.hero.cards[0].bg = 'navy" onclick="window.__xss=8';
+  content.theme = { text: 'red;background:url(javascript:alert(1))', hbar: '#123456' };
+  content.sections[1].textColor = '#fff" onmouseover="window.__xss=11';
   content.sections.find((s) => s.id === 'achievements').items[1].links = [
     { id: 'x1', label: '<b onmouseover="window.__xss=9">x</b>', href: 'javascript:window.__xss=10' },
     { id: 'x2', label: 'ok', href: '//evil.example/x' }
@@ -612,6 +614,42 @@ test('Цвета внутренних плашек и карточек', async (
   await context.close();
 });
 
+test('Цвета текста и деталей, цвет текста блока', async (b) => {
+  const { page, context, db } = await newPage(b);
+  await loginOk(page);
+  await menu(page, 'Цвета');
+  const set = (key, hex) => page.locator(`[data-field="theme-${key}"]`).fill(hex);
+  await set('epibar', '#aa0000');
+  await set('epiauthor', '#00aa00');
+  await set('hbar', '#0000aa');
+  await set('tlline', '#aa00aa');
+  await set('dot', '#00aaaa');
+  await set('text', '#333333');
+  await set('heading', '#550000');
+  await page.locator('.panel:has(> h2:text-is("Опыт работы")) [data-field="text-color"]').fill('#224466');
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  assert(db.content.theme.epibar === '#aa0000' && db.content.theme.text === '#333333', 'тема не сохранена');
+  assert(db.content.sections.find((s) => s.id === 'experience').textColor === '#224466', 'цвет текста блока');
+
+  const site = await context.newPage();
+  await openSite(site);
+  const c = await site.evaluate(() => {
+    const st = (sel, prop, pseudo) => getComputedStyle(document.querySelector(sel), pseudo || null)[prop];
+    return {
+      epibar: st('.epigraph', 'borderLeftColor'), author: st('.epigraph cite', 'color'),
+      hbar: st('#about .section-head h2', 'backgroundColor', '::after'), tl: st('.timeline', 'borderTopColor'),
+      dot: st('.dots li', 'backgroundColor', '::before'), text: st('#about .about-text', 'color'),
+      heading: st('#about .section-head h2', 'color'), expText: st('#experience .tl-item h3', 'color'),
+      cardText: st('#education .card', 'color'), contacts: st('#contacts .section-head h2', 'color')
+    };
+  });
+  const want = { epibar: 'rgb(170, 0, 0)', author: 'rgb(0, 170, 0)', hbar: 'rgb(0, 0, 170)', tl: 'rgb(170, 0, 170)', dot: 'rgb(0, 170, 170)',
+    text: 'rgb(51, 51, 51)', heading: 'rgb(85, 0, 0)', expText: 'rgb(34, 68, 102)', cardText: 'rgb(51, 51, 51)', contacts: 'rgb(255, 255, 255)' };
+  for (const k of Object.keys(want)) assert(c[k] === want[k], k + ': ' + c[k]);
+  await context.close();
+});
+
 test('Достижения: ссылки на материалы', async (b) => {
   const { page, context, db } = await newPage(b);
   await loginOk(page);
@@ -656,7 +694,7 @@ test('Страница «Цвета»: все цветные блоки в од�
   await loginOk(page);
   await menu(page, 'Цвета');
   const panels = await page.$$eval('.view .panel > h2', (els) => els.map((e) => e.firstChild.textContent));
-  assert(panels[0] === 'Шапка' && panels.length === 1 + DEFAULT.sections.length, 'панели: ' + panels.join(', '));
+  assert(panels[0] === 'Текст и детали' && panels[1] === 'Шапка' && panels.length === 2 + DEFAULT.sections.length, 'панели: ' + panels.join(', '));
   const hero = page.locator('.panel:has(> h2:text-is("Шапка"))');
   assert(await hero.locator('.field > span:text-matches("^Карточка [123]")').count() === 3, 'нет трёх карточек шапки');
   await hero.locator('.field:has(> span:text-matches("^Карточка 3")) .swatch[title="Тёмно-синий"]').click();

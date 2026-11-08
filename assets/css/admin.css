@@ -109,6 +109,7 @@ details.more > summary { cursor: pointer; font-weight: 700; color: var(--sky-dee
 .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
 .swatch:hover { border-color: var(--navy); }
 .colors-page .hint { display: none; }
+.colors-sub { font-size: 15px; margin: 18px 0 10px; padding-top: 12px; border-top: 1px dashed var(--line); color: var(--muted); }
 .colors-page .field { margin-bottom: 12px; }
 
 /* «как задумано»: исходный цвет с косой чертой */
