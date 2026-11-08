@@ -442,6 +442,14 @@
     ['#f5b6c7', '#f5b6c7', 'Пудрово-розовый'], ['#e9d2aa', '#e9d2aa', 'Тёплый беж'], ['#ffffff', '#ffffff', 'Белый']];
   var BG_SWATCHES = [['cream', 'Кремовый'], ['sky', 'Небесно-голубой'], ['powder', 'Пудрово-розовый'], ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий']]
     .map(function (b) { return [b[0], S.BG_PRESETS[b[0]], b[1]]; });
+  var BOX_SWATCHES = [['paper', 'Белый'], ['cream', 'Кремовый'], ['sky', 'Небесно-голубой'], ['powder', 'Пудрово-розовый'],
+    ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий'], ['gold', 'Золото']]
+    .map(function (b) { return [b[0], S.BOX_PRESETS[b[0]], b[1]]; });
+
+  // Цвет плашки или карточки; пустое значение = «как задумано» (defaultHex показывает, какой это цвет)
+  function boxColorField(obj, key, label, defaultHex, defaultTitle) {
+    return colorField(obj, key, label, '', [['', defaultHex, defaultTitle || 'Как задумано']].concat(BOX_SWATCHES), { name: 'box-' + key });
+  }
 
   // Выбор цвета: кнопки цветов сайта, палитра RGB и код #rrggbb
   function colorField(obj, key, label, def, swatchList, opts) {
@@ -469,7 +477,8 @@
       if (S.isHex(v)) set(v.toLowerCase());
     });
     var swatches = h('div', { className: 'swatches' }, swatchList.map(function (s) {
-      var b = h('button', { type: 'button', className: 'swatch', title: s[2], 'aria-label': s[2], style: 'background:' + s[1], onclick: function () { set(s[0]); } });
+      var b = h('button', { type: 'button', className: 'swatch' + (s[0] === '' ? ' swatch-default' : ''), title: s[2], 'aria-label': s[2],
+        style: 'background:' + s[1], onclick: function () { set(s[0]); } });
       b._value = s[0]; b._hex = s[1];
       buttons.push(b);
       return b;
@@ -796,8 +805,25 @@
         textField(sec, 'menuLabel', 'Название в меню', { hint: 'Если пусто, берётся заголовок', onInput: refreshMenu }),
         menuCheck(sec)
       ]),
-      colorField(sec, 'bg', 'Фон блока', 'cream', BG_SWATCHES, { name: 'section-bg' })
+      colorField(sec, 'bg', 'Фон блока', 'cream', BG_SWATCHES, { name: 'section-bg' }),
+      CARD_COLORS[sec.type] ? boxColorField(sec, 'cardBg', CARD_COLORS[sec.type][1], CARD_COLORS[sec.type][0]) : null
     ];
+  }
+
+  // Блоки с карточками внутри: исходный цвет карточек и подпись поля
+  var CARD_COLORS = {
+    education: ['#fffcf6', 'Цвет карточек внутри блока'],
+    courses: ['#fffcf6', 'Цвет карточек внутри блока'],
+    achievements: ['#fffcf6', 'Цвет карточек внутри блока'],
+    materials: ['#fffcf6', 'Цвет карточек внутри блока'],
+    contacts: ['#2c3f70', 'Цвет карточек с контактами'],
+    gallery: ['#fffcf6', 'Цвет плашки пустого альбома']
+  };
+
+  // Цвет карточек блока, который наследует карточка без своего цвета
+  function cardHex(sec) {
+    var v = sec.cardBg;
+    return (S.isHex(v) ? v : S.BOX_PRESETS[v]) || (CARD_COLORS[sec.type] || ['#fffcf6'])[0];
   }
 
   // Пункт в меню показан, пока не задано menu: false
@@ -815,7 +841,8 @@
     about: function (sec, v) {
       v.appendChild(panel('Текст', [
         textField(sec, 'text', 'О себе', { rows: 12, hint: 'Пустая строка между абзацами начинает новый абзац.' }),
-        textField(sec, 'goal', 'Выделенная фраза', { rows: 2 })
+        textField(sec, 'goal', 'Выделенная фраза', { rows: 2 }),
+        boxColorField(sec, 'goalBg', 'Цвет плашки с выделенной фразой', '#f5b6c7')
       ]));
       v.appendChild(panel('Фото', [imageField(sec, 'photo', 'Фото в круге', 'circle'), more([textField(sec, 'photoAlt', 'Описание фото для незрячих')])]));
     },
@@ -829,6 +856,7 @@
           b.appendChild(textField(it, 'place', 'Город'));
           b.appendChild(textField(it, 'period', 'Годы обучения', { placeholder: 'например: с 2024 по 2027' }));
           b.appendChild(textField(it, 'text', 'Специальность, квалификация', { rows: 3, hint: 'Каждая строка выводится отдельно.' }));
+          b.appendChild(boxColorField(it, 'bg', 'Цвет этой карточки', cardHex(sec), 'Как у остальных карточек'));
         }
       })]));
       v.appendChild(panel(null, [more([textField(sec, 'text', 'Вступительный текст', { rows: 3 })])]));
@@ -859,6 +887,7 @@
           b.appendChild(textField(it, 'hours', 'Часов'));
           b.appendChild(textField(it, 'text', 'Описание', { rows: 3 }));
           b.appendChild(linkField(it, 'link', 'Удостоверение или сертификат'));
+          b.appendChild(boxColorField(it, 'bg', 'Цвет этой карточки', cardHex(sec), 'Как у остальных карточек'));
         }
       })]));
     },
@@ -878,6 +907,7 @@
           b.appendChild(textField(it, 'text', 'Описание', { rows: 3 }));
           if (!Array.isArray(it.scans)) it.scans = [];
           b.appendChild(mediaField(it.scans, { label: 'Сканы дипломов и грамот', shape: 'wide', allowVideo: false, captions: false }));
+          b.appendChild(boxColorField(it, 'bg', 'Цвет этой карточки', cardHex(sec), 'Как у остальных карточек'));
           b.appendChild(h('p', { className: 'muted', text: 'Не публикуйте документы с персональными данными других людей (например, списки награждённых).' }));
         }
       })]));
@@ -910,9 +940,10 @@
           b.appendChild(textField(it, 'title', 'Название', { onInput: upd }));
           b.appendChild(textField(it, 'text', 'Пояснение', { rows: 2 }));
           b.appendChild(linkField(it, 'link', 'Ссылка или файл'));
+          b.appendChild(boxColorField(it, 'bg', 'Цвет этой карточки', cardHex(sec), 'Как у остальных карточек'));
         }
       })]));
-      v.appendChild(panel('В конце', [textField(sec, 'remember', 'Памятка в рамке', { rows: 3 })]));
+      v.appendChild(panel('В конце', [textField(sec, 'remember', 'Памятка в рамке', { rows: 3 }), boxColorField(sec, 'rememberBg', 'Цвет памятки', '#1c2a4f')]));
     },
     contacts: function (sec, v) {
       v.appendChild(panel('Контакты', [
@@ -949,6 +980,7 @@
           textField(hr, 'role', 'Должность'),
           textField(hr, 'epigraph', 'Эпиграф', { rows: 3, hint: 'Кавычки «» добавятся сами.' }),
           textField(hr, 'epigraphAuthor', 'Автор эпиграфа'),
+          boxColorField(hr, 'epigraphBg', 'Фон эпиграфа', '#fffcf6'),
           textField(hr, 'text', 'Короткий текст', { rows: 3 }),
           colorField(hr, 'bg', 'Фон шапки', 'cream', BG_SWATCHES, { name: 'hero-bg' })
         ]));
@@ -979,6 +1011,7 @@
           fields: function (c, body, upd) {
             body.appendChild(textField(c, 'title', 'Крупно', { onInput: upd }));
             body.appendChild(textField(c, 'text', 'Пояснение', { rows: 2 }));
+            body.appendChild(boxColorField(c, 'bg', 'Цвет карточки', ['#8cc4ec', '#f5b6c7', '#e9d2aa'][Math.max(0, hr.cards.indexOf(c)) % 3]));
           }
         }), h('p', { className: 'muted', text: 'Лучше всего смотрятся три карточки.' })]));
       }

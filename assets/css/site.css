@@ -123,6 +123,14 @@ button { font: inherit; color: inherit; }
 .is-dark .btn.alt:hover { background: #fff; color: var(--navy); }
 .is-dark .btn { border-color: #fff; }
 .hero-card, .epigraph, .goal, .empty-album, .chip:not([aria-pressed="true"]) { color: var(--ink); }
+
+/* плашки и карточки со своим цветом (выбирается в админке) */
+.on-light, .on-light h3, .on-light .v { color: var(--ink); }
+.on-light .k { color: var(--muted); }
+.on-dark, .on-dark h3, .on-dark h3 a, .on-dark .v, .hero-card.on-dark h3 { color: #fff; }
+.on-dark .meta, .on-dark .org, .on-dark .k, .on-dark cite, .on-dark .link-btn { color: var(--gold-light); }
+.on-dark .body, .on-dark .desc, .on-dark .lines { color: rgba(255, 255, 255, 0.9); }
+.bg-cream .card.on-light, .bg-cream .card.on-dark { border-color: transparent; }
 .is-dark .chip:not([aria-pressed="true"]) { background: var(--paper); }
 .section-head { margin-bottom: 32px; max-width: 760px; }
 .section-head h2 { font-size: clamp(30px, 4vw, 44px); }

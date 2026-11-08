@@ -163,6 +163,15 @@
     return { cls: 'bg-' + name + (name === 'navy' ? ' is-dark' : ''), style: '' };
   }
 
+  // Цвет внутренней плашки или карточки: имя цвета сайта или #rrggbb; пусто = как в оформлении
+  var BOX_PRESETS = { paper: '#fffcf6', cream: '#fbf5ea', sky: '#8cc4ec', powder: '#f5b6c7', beige: '#e9d2aa', navy: '#1c2a4f', gold: '#c39a2b' };
+
+  function boxStyle(value) {
+    var hex = isHex(value) ? value.toLowerCase() : BOX_PRESETS[value];
+    if (!hex) return { cls: '', style: '' };
+    return { cls: isDarkColor(hex) ? ' on-dark' : ' on-light', style: 'background:' + hex };
+  }
+
   // Стандартные блоки сайта
   var SECTION_TYPES = {
     about: 'Обо мне',
@@ -200,6 +209,8 @@
     isHex: isHex,
     isDarkColor: isDarkColor,
     bgStyle: bgStyle,
+    BOX_PRESETS: BOX_PRESETS,
+    boxStyle: boxStyle,
     DEMO_KEY: DEMO_KEY
   };
 })(window);

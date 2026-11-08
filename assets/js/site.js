@@ -11,6 +11,12 @@
 
   function has(v) { return String(v == null ? '' : v).trim() !== ''; }
 
+  // class и style для плашки или карточки со своим цветом
+  function box(cls, color) {
+    var b = S.boxStyle(color);
+    return 'class="' + cls + b.cls + '"' + (b.style ? ' style="' + b.style + '"' : '');
+  }
+
   function anchorId(id) { return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '') || 'block'; }
 
   function img(media, alt, extraClass) {
@@ -39,7 +45,7 @@
       var photo = sec.photo && S.safeMediaUrl(sec.photo.src);
       if (!text && !has(sec.goal) && !photo) return '';
       return head(sec) + '<div class="about-grid' + (photo ? '' : ' no-photo') + '"><div class="about-text">' + text +
-        (has(sec.goal) ? '<div class="goal">' + esc(sec.goal) + '</div>' : '') + '</div>' +
+        (has(sec.goal) ? '<div ' + box('goal', sec.goalBg) + '>' + esc(sec.goal) + '</div>' : '') + '</div>' +
         (photo ? '<div class="about-photo">' + img(sec.photo, sec.photoAlt || 'Фото учителя') + '</div>' : '') + '</div>';
     },
 
@@ -49,7 +55,7 @@
       return head(sec, S.paragraphs(sec.text)) + '<div class="grid-2">' + items.map(function (it) {
         var meta = [it.place, it.period].filter(has).map(esc).join(' · ');
         var ls = S.lines(it.text);
-        return '<article class="card"><h3>' + esc(it.title) + '</h3>' + (meta ? '<div class="meta">' + meta + '</div>' : '') +
+        return '<article ' + box('card', it.bg || sec.cardBg) + '><h3>' + esc(it.title) + '</h3>' + (meta ? '<div class="meta">' + meta + '</div>' : '') +
           (ls.length ? '<ul class="lines">' + ls.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' : '') + '</article>';
       }).join('') + '</div>';
     },
@@ -70,7 +76,7 @@
       if (!items.length && !has(sec.text)) return '';
       return head(sec, S.paragraphs(sec.text)) + (items.length ? '<div class="grid-2">' + items.map(function (it) {
         var meta = [it.org, it.year, it.hours ? it.hours + ' ч' : ''].filter(has).map(esc).join(' · ');
-        return '<article class="card"><h3>' + esc(it.title) + '</h3>' + (meta ? '<div class="meta">' + meta + '</div>' : '') +
+        return '<article ' + box('card', it.bg || sec.cardBg) + '><h3>' + esc(it.title) + '</h3>' + (meta ? '<div class="meta">' + meta + '</div>' : '') +
           (has(it.text) ? '<div class="body">' + S.paragraphs(it.text) + '</div>' : '') +
           link(it.link, 'Документ', 'link-btn') + '</article>';
       }).join('') + '</div>' : '');
@@ -94,7 +100,7 @@
         var ci = allCats.indexOf(it.category);
         var cover = scans.length ? '<button type="button" class="cover" data-open="' + key + '" data-index="0" aria-label="Открыть документ: ' + esc(it.title) + '">' +
           img(scans[0], it.title) + '</button>' : '<div class="cover cover-plain"></div>';
-        return '<article class="card ach" data-category="' + esc(it.category || '') + '">' + cover + '<div class="ach-body">' +
+        return '<article ' + box('card ach', it.bg || sec.cardBg) + ' data-category="' + esc(it.category || '') + '">' + cover + '<div class="ach-body">' +
           (has(it.category) ? '<span class="tag t' + (ci < 0 ? 0 : ci % 3) + '">' + esc(it.category) + '</span>' : '') +
           '<h3>' + esc(it.title) + '</h3>' + (has(it.org) ? '<div class="org">' + esc(it.org) + '</div>' : '') +
           (has(it.text) ? '<div class="desc">' + esc(it.text) + '</div>' : '') +
@@ -133,7 +139,7 @@
           return '<figure style="margin:0"><button type="button" class="media-tile" data-open="' + key + '" data-index="' + j + '" aria-label="' +
             (m.type === 'video' ? 'Смотреть видео' : 'Открыть фото') + ' ' + (j + 1) + '">' + inner + '</button>' +
             (has(m.caption) ? '<figcaption class="media-caption">' + esc(m.caption) + '</figcaption>' : '') + '</figure>';
-        }).join('') + '</div>' : '<div class="empty-album">' + esc(sec.emptyText || 'Скоро здесь появятся фотографии.') + '</div>';
+        }).join('') + '</div>' : '<div ' + box('empty-album', sec.cardBg) + '>' + esc(sec.emptyText || 'Скоро здесь появятся фотографии.') + '</div>';
         return '<div class="album" data-album-panel="' + i + '"' + (i === 0 ? '' : ' hidden') + '>' +
           (has(a.text) ? '<div class="album-text">' + S.paragraphs(a.text) + '</div>' : '') + grid + '</div>';
       }).join('');
@@ -147,9 +153,9 @@
       return head(sec, S.paragraphs(sec.text)) + (items.length ? '<div class="mat-list">' + items.map(function (it, i) {
         var url = S.safeUrl(it.link);
         var title = url ? link(url, it.title, '') : esc(it.title);
-        return '<article class="card mat"><span class="num">' + (i + 1) + '</span><div><h3>' + title + '</h3>' +
+        return '<article ' + box('card mat', it.bg || sec.cardBg) + '><span class="num">' + (i + 1) + '</span><div><h3>' + title + '</h3>' +
           (has(it.text) ? '<div class="body">' + esc(it.text) + '</div>' : '') + '</div></article>';
-      }).join('') + '</div>' : '') + (has(sec.remember) ? '<div class="remember">' + esc(sec.remember) + '</div>' : '');
+      }).join('') + '</div>' : '') + (has(sec.remember) ? '<div ' + box('remember', sec.rememberBg) + '>' + esc(sec.remember) + '</div>' : '');
     },
 
     contacts: function (sec) {
@@ -173,9 +179,9 @@
       return head(sec, S.paragraphs(sec.text)) + '<div class="contact-grid">' + rows.map(function (r) {
         var url = S.safeUrl(r[2]);
         var inner = '<span class="k">' + esc(r[0]) + '</span><span class="v">' + esc(r[1]) + '</span>';
-        if (!url) return '<div class="contact">' + inner + '</div>';
+        if (!url) return '<div ' + box('contact', sec.cardBg) + '>' + inner + '</div>';
         var ext = /^https?:/i.test(url) ? ' target="_blank" rel="noopener noreferrer"' : '';
-        return '<a class="contact" href="' + esc(url) + '"' + ext + '>' + inner + '</a>';
+        return '<a ' + box('contact', sec.cardBg) + ' href="' + esc(url) + '"' + ext + '>' + inner + '</a>';
       }).join('') + '</div>';
     },
 
@@ -202,12 +208,12 @@
       (has(h.kicker) ? '<div class="hero-kicker">' + esc(h.kicker) + '</div>' : '') +
       '<h1>' + esc(h.name) + '</h1>' +
       (has(h.role) ? '<div class="hero-role">' + esc(h.role) + '</div>' : '') +
-      (has(h.epigraph) ? '<blockquote class="epigraph"><p>«' + esc(h.epigraph) + '»</p>' + (has(h.epigraphAuthor) ? '<cite>' + esc(h.epigraphAuthor) + '</cite>' : '') + '</blockquote>' : '') +
+      (has(h.epigraph) ? '<blockquote ' + box('epigraph', h.epigraphBg) + '><p>«' + esc(h.epigraph) + '»</p>' + (has(h.epigraphAuthor) ? '<cite>' + esc(h.epigraphAuthor) + '</cite>' : '') + '</blockquote>' : '') +
       (has(h.text) ? '<div class="hero-text">' + S.paragraphs(h.text) + '</div>' : '') +
       (buttons.length ? '<div class="buttons">' + buttons.join('') + '</div>' : '') +
       '</div>' + (photo ? '<div class="portrait"' + (/^#[0-9a-f]{6}$/i.test(h.ringColor || '') ? ' style="--ring:' + h.ringColor + '"' : '') + '><div class="circle">' + img(h.photo, h.photoAlt || h.name) + '</div></div>' : '') + '</div>' +
       (cardList.length ? '<div class="hero-cards">' + cardList.map(function (c) {
-        return '<div class="hero-card">' + (has(c.title) ? '<h3>' + esc(c.title) + '</h3>' : '') + (has(c.text) ? '<p>' + esc(c.text) + '</p>' : '') + '</div>';
+        return '<div ' + box('hero-card', c.bg) + '>' + (has(c.title) ? '<h3>' + esc(c.title) + '</h3>' : '') + (has(c.text) ? '<p>' + esc(c.text) + '</p>' : '') + '</div>';
       }).join('') + '</div>' : '') + '</div></header>';
   }
 

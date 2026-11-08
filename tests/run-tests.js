@@ -296,6 +296,8 @@ test('Защита от XSS', async (b) => {
   content.hero.ringColor = 'red" onmouseover="window.__xss=5';
   content.hero.bg = '#fff" onmouseover="window.__xss=6';
   content.sections[0].bg = 'red;background:url(javascript:alert(1))';
+  content.sections[0].goalBg = '#000" onmouseover="window.__xss=7';
+  content.hero.cards[0].bg = 'navy" onclick="window.__xss=8';
   const { page, context } = await newPage(b, { content });
   await openSite(page);
   await page.waitForTimeout(500);
@@ -564,6 +566,45 @@ test('Демо-режим без базы: правки сохраняются �
   assert(src === 'demo', 'источник ' + src);
   assert((await page.textContent('h1')) === 'Демо имя', 'правка не видна');
   assert(await page.isVisible('.demo-bar'), 'нет пометки демо-режима');
+  await context.close();
+});
+
+test('Цвета внутренних плашек и карточек', async (b) => {
+  const { page, context, db } = await newPage(b);
+  await loginOk(page);
+  // «Обо мне»: рамка с фразой тёмно-синяя
+  await menu(page, 'Обо мне');
+  await page.click('.field:has(> span:text-is("Цвет плашки с выделенной фразой")) .swatch[title="Тёмно-синий"]');
+  // «Образование»: все карточки голубые, одна карточка своим цветом
+  await menu(page, 'Образование');
+  await page.click('.field:has(> span:text-is("Цвет карточек внутри блока")) .swatch[title="Небесно-голубой"]');
+  await page.click('.item-title >> nth=0');
+  await page.locator('.field:has(> span:text-is("Цвет этой карточки")) input[type="color"]').fill('#552244');
+  // шапка: вторая карточка золотая
+  await menu(page, 'Шапка');
+  await page.click('.panel:has(h2:text-is("Карточки под шапкой")) .item-title >> nth=1');
+  await page.click('.panel:has(h2:text-is("Карточки под шапкой")) .swatch[title="Золото"]');
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+
+  const secs = db.content.sections;
+  assert(secs.find((s) => s.id === 'about').goalBg === 'navy', 'цвет фразы');
+  const edu = secs.find((s) => s.id === 'education');
+  assert(edu.cardBg === 'sky' && edu.items[0].bg === '#552244', 'цвета карточек образования');
+  assert(db.content.hero.cards[1].bg === 'gold', 'цвет карточки шапки');
+
+  const site = await context.newPage();
+  await openSite(site);
+  const c = await site.evaluate(() => {
+    const st = (el) => getComputedStyle(el);
+    const goal = document.querySelector('.goal');
+    const card = document.querySelector('#education .card');
+    return [st(goal).backgroundColor, st(goal).color, st(card).backgroundColor, st(card.querySelector('h3')).color,
+      st(document.querySelectorAll('.hero-card')[1]).backgroundColor];
+  });
+  assert(c[0] === 'rgb(28, 42, 79)' && c[1] === 'rgb(255, 255, 255)', 'фраза: ' + c[0] + ' / ' + c[1]);
+  assert(c[2] === 'rgb(85, 34, 68)' && c[3] === 'rgb(255, 255, 255)', 'карточка: ' + c[2] + ' / ' + c[3]);
+  assert(c[4] === 'rgb(195, 154, 43)', 'карточка шапки: ' + c[4]);
   await context.close();
 });
 
