@@ -291,6 +291,31 @@ test('Пустые поля и пустые блоки не показывают
   await context.close();
 });
 
+test('Контакты: MAX вместо ВКонтакте', async (b) => {
+  const { page, context, db } = await newPage(b);
+  await loginOk(page);
+  await menu(page, 'Контакты');
+  assert(!(await page.textContent('#view')).includes('ВКонтакте'), 'в админке осталось поле ВКонтакте');
+  await page.fill('[data-field="contact-max"]', 'https://max.ru/u/darya_teacher');
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  assert(db.content.sections.find((s) => s.id === 'contacts').max === 'https://max.ru/u/darya_teacher', 'MAX не сохранён');
+  const site = await context.newPage();
+  await openSite(site);
+  const c = await site.textContent('#contacts');
+  assert(!c.includes('ВКонтакте'), 'на сайте осталось ВКонтакте');
+  const a = site.locator('#contacts a.contact:has-text("MAX")');
+  assert(await a.getAttribute('href') === 'https://max.ru/u/darya_teacher' && await a.getAttribute('target') === '_blank', 'нет ссылки на MAX');
+  // номер вместо ссылки показывается текстом, без ссылки
+  const content = clone(DEFAULT);
+  content.sections.find((s) => s.id === 'contacts').max = 'javascript:alert(1)';
+  const { page: p2, context: c2 } = await newPage(b, { content });
+  await openSite(p2);
+  assert(!(await p2.$('a[href^="javascript" i]')), 'опасная ссылка MAX');
+  await c2.close();
+  await context.close();
+});
+
 test('Защита от XSS', async (b) => {
   const content = clone(DEFAULT);
   content.hero.name = '<img src=x onerror="window.__xss=1">Имя';
@@ -664,24 +689,23 @@ test('Редактор видео: ползунки начала и конца, 
   await context.close();
 });
 
-test('Горизонтальное видео: выбор вертикальной части', async (b) => {
+test('Горизонтальное видео: вертикальная обложка в галерее, открывается целиком', async (b) => {
   const { page, context, db } = await newPage(b);
   await loginOk(page);
   await menu(page, 'Фотографии');
   await page.click('.item-title:has-text("Подготовка к школе")');
-  // video-03 вертикальное: переключателя быть не должно
+  // video-03 вертикальное: окна обложки нет
   await page.click('.media-card >> nth=6 >> [data-action="video-edit"]');
   await page.waitForSelector('.vmodal[data-ready]');
-  assert(await page.isHidden('.vvert'), 'у вертикального видео есть переключатель');
+  assert(await page.isHidden('.vvert') && await page.isHidden('.vwin'), 'у вертикального видео есть окно обложки');
   await page.click('.vmodal button:has-text("Отмена")');
-  // video-01 горизонтальное
+  // video-01 горизонтальное: окно 4:5, как плитка альбома, сразу видно
   await page.click('.media-card >> nth=4 >> [data-action="video-edit"]');
   await page.waitForSelector('.vmodal[data-ready]');
-  assert(await page.isVisible('.vvert'), 'нет переключателя для горизонтального видео');
-  await page.check('[data-field="vertical"]');
+  assert(await page.isVisible('.vwin'), 'нет окна обложки');
   const win = await page.locator('.vwin').boundingBox();
   const frame = await page.locator('.vframe').boundingBox();
-  assert(Math.abs(win.width / win.height - 9 / 16) < 0.02, 'окно не 9:16');
+  assert(Math.abs(win.width / win.height - 4 / 5) < 0.02, 'окно не 4:5');
   assert(Math.abs(win.x + win.width / 2 - (frame.x + frame.width / 2)) < 3, 'окно не по центру');
   await page.mouse.move(win.x + win.width / 2, win.y + win.height / 2);
   await page.mouse.down();
@@ -693,18 +717,22 @@ test('Горизонтальное видео: выбор вертикально
   await page.click('#saveBtn');
   await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
   const v = db.content.sections.find((x) => x.id === 'photos').albums[0].items.find((x) => x.id === 'pod-video-01');
-  assert(v.vertical === true && v.vx === 100 && v.frame.x === 100, 'не сохранено: ' + JSON.stringify([v.vertical, v.vx, v.frame]));
+  assert(v.frame.x === 100 && !('vertical' in v), 'не сохранено: ' + JSON.stringify(v.frame));
 
   const site = await context.newPage();
   await openSite(site);
-  await site.click('[data-album-panel="0"] .media-tile >> nth=4');
-  await site.waitForSelector('.lightbox.open .lb-vert video');
+  const tile = site.locator('[data-album-panel="0"] .media-tile >> nth=4');
+  const tb = await tile.boundingBox();
+  assert(Math.abs(tb.width / tb.height - 4 / 5) < 0.02, 'плитка не вертикальная');
+  const pos = await tile.locator('img').evaluate((e) => getComputedStyle(e).objectPosition);
+  assert(pos.startsWith('100%'), 'на обложке не та часть: ' + pos);
+  await tile.click();
+  await site.waitForSelector('.lightbox.open video');
   const r = await site.evaluate(() => {
-    const box = document.querySelector('.lb-vert').getBoundingClientRect();
-    return [box.width / box.height, getComputedStyle(document.querySelector('.lb-vert video')).objectPosition];
+    const v = document.querySelector('.lightbox video'); const box = v.getBoundingClientRect();
+    return [box.width / box.height, getComputedStyle(v).objectFit, !!document.querySelector('.lb-vert')];
   });
-  assert(Math.abs(r[0] - 9 / 16) < 0.02, 'на сайте не вертикально: ' + r[0]);
-  assert(r[1] === '100% 50%', 'не та часть кадра: ' + r[1]);
+  assert(r[0] > 1.5 && r[1] === 'contain' && !r[2], 'видео открылось не целиком: ' + r.join(' '));
   await context.close();
 });
 
@@ -744,7 +772,6 @@ test('Телефон: кнопки в альбоме и редакторе ви�
     }
     await page.click('.media-card >> nth=4 >> [data-action="video-edit"]');
     await page.waitForSelector('.vmodal[data-ready]');
-    await page.check('[data-field="vertical"]');
     for (const sel of ['.vtl', '.vposter', '.vcard > .row-end']) {
       await page.locator(sel).scrollIntoViewIfNeeded();
       const o = await page.evaluate(overlaps);

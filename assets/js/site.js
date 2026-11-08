@@ -155,7 +155,7 @@
       html += albums.map(function (a, i) {
         var items = visible(a.items).filter(function (m) { return S.safeMediaUrl(m.src); });
         var key = ctx.addGallery(items.map(function (m) {
-          return { type: m.type === 'video' ? 'video' : 'photo', src: m.src, poster: m.poster, caption: m.caption, start: m.start, end: m.end, vertical: !!m.vertical, vx: m.vx };
+          return { type: m.type === 'video' ? 'video' : 'photo', src: m.src, poster: m.poster, caption: m.caption, start: m.start, end: m.end };
         }));
         var grid = items.length ? '<div class="media-grid">' + items.map(function (m, j) {
           var inner;
@@ -196,15 +196,14 @@
         if (/^https?:/i.test(v)) return v;
         return 'https://t.me/' + v.replace(/^@/, '').replace(/[^a-zA-Z0-9_]/g, '');
       }
-      function vk(v) {
-        v = String(v || '').trim();
-        if (/^https?:/i.test(v)) return v;
-        return 'https://vk.com/' + v.replace(/^@/, '').replace(/[^a-zA-Z0-9_.]/g, '');
-      }
       if (has(sec.phone)) rows.push(['Телефон', sec.phone, 'tel:' + String(sec.phone).replace(/[^\d+]/g, '')]);
       if (has(sec.email)) rows.push(['E-mail', sec.email, 'mailto:' + String(sec.email).trim()]);
       if (has(sec.telegram)) rows.push(['Telegram', sec.telegram, tg(sec.telegram)]);
-      if (has(sec.vk)) rows.push(['ВКонтакте', sec.vk, vk(sec.vk)]);
+      // MAX: ссылка на профиль открывается в мессенджере, номер или имя показываются текстом
+      if (has(sec.max)) {
+        var mx = String(sec.max).trim();
+        rows.push(/^https?:/i.test(mx) ? ['MAX', 'Написать в MAX', mx] : ['MAX', mx, '']);
+      }
       if (has(sec.place)) rows.push(['Где работаю', sec.place, '']);
       if (!rows.length && !has(sec.text)) return '';
       return head(sec, S.paragraphs(sec.text)) + '<div class="contact-grid">' + rows.map(function (r) {
@@ -293,11 +292,6 @@
     if (it.type === 'video') {
       var poster = S.safeMediaUrl(it.poster);
       html = '<video controls playsinline preload="auto" src="' + esc(src) + '"' + (poster ? ' poster="' + esc(poster) + '"' : '') + '></video>';
-      // горизонтальное видео, для которого в админке выбрана вертикальная часть
-      if (it.vertical) {
-        var vx = Math.max(0, Math.min(100, Number(it.vx) || 50));
-        html = '<div class="lb-vert" style="--vx:' + vx + '%">' + html + '</div>';
-      }
     } else {
       html = '<img src="' + esc(src) + '" alt="' + esc(it.caption || '') + '">';
     }

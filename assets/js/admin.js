@@ -410,14 +410,14 @@
     var src = previewSrc(m.src);
     if (!src) return;
     var st = { start: Number(m.start) || 0, end: Number(m.end) || 0, dur: 0, posterBlob: null, posterUrl: previewSrc(m.poster) || '', posterTime: m.posterTime,
-      vertical: !!m.vertical, vx: m.vx >= 0 ? Number(m.vx) : 50, landscape: false };
+      vx: S.normFrame(m.frame).x, landscape: false };
     var playing = false, raf = 0;
 
     var video = h('video', { className: 'vplayer', playsinline: true, preload: 'auto' });
     video.playsInline = true;
     corsVideo(video, src);
-    // вертикальное окно 9:16 поверх горизонтального видео; тянется влево и вправо
-    var vwin = h('div', { className: 'vwin', 'data-field': 'vertical-window', role: 'slider', tabindex: '0', 'aria-label': 'Положение вертикального кадра' });
+    // окно с пропорциями плитки альбома (4:5) поверх горизонтального видео: эта часть видна на обложке в галерее
+    var vwin = h('div', { className: 'vwin', 'data-field': 'cover-window', role: 'slider', tabindex: '0', 'aria-label': 'Какая часть видео видна на обложке' });
     vwin.addEventListener('keydown', function (e) {
       var d = { ArrowLeft: -2, ArrowRight: 2 }[e.key];
       if (!d) return;
@@ -426,21 +426,20 @@
       placeWin();
     });
     var vframe = h('div', { className: 'vframe' }, [video, vwin]);
-    var vertCb = h('input', { type: 'checkbox', 'data-field': 'vertical' });
-    var vertBox = h('label', { className: 'check vvert' }, [vertCb, h('span', {}, [h('strong', { text: 'Показывать вертикально' }),
-      h('small', { className: 'muted', text: ' Для горизонтального видео: на сайте оно откроется вертикально. Перетащите светлое окно на нужную часть кадра.' })])]);
-    vertCb.addEventListener('change', function () { st.vertical = vertCb.checked; layout(); });
+    var vertBox = h('div', { className: 'vvert' }, [h('strong', { text: 'Вертикальная обложка' }),
+      h('small', { className: 'muted', text: 'В галерее горизонтальное видео показывается вертикальной плиткой. Сдвиньте светлое окно на ту часть кадра, которую увидят посетители. При нажатии видео откроется целиком.' })]);
     function placeWin() {
-      if (!(st.vertical && st.landscape)) return;
+      if (!st.landscape) return;
       var fw = vframe.clientWidth, fh = vframe.clientHeight;
-      var ww = Math.min(fw, fh * 9 / 16);
+      var ww = Math.min(fw, fh * 4 / 5);
       vwin.style.width = ww + 'px';
       vwin.style.left = ((fw - ww) * st.vx / 100) + 'px';
       vwin.setAttribute('aria-valuenow', Math.round(st.vx));
+      posterImg.style.objectPosition = st.vx + '% 50%';
     }
     var vdrag = null;
     vframe.addEventListener('pointerdown', function (e) {
-      if (!(st.vertical && st.landscape)) return;
+      if (!st.landscape) return;
       e.preventDefault();
       vdrag = { x: e.clientX, vx: st.vx };
       try { vframe.setPointerCapture(e.pointerId); } catch (err) { /* без захвата */ }
@@ -507,8 +506,7 @@
       playBtn.textContent = playing ? '❚❚ Пауза' : '▶ Просмотр';
       muteBtn.textContent = video.muted ? 'Звук выкл.' : 'Звук вкл.';
       vertBox.hidden = !st.landscape;
-      vertCb.checked = st.vertical;
-      vframe.classList.toggle('is-vertical', st.vertical && st.landscape);
+      vframe.classList.toggle('is-vertical', st.landscape);
       placeWin();
       posterImg.hidden = !st.posterUrl;
       posterEmpty.hidden = !!st.posterUrl;
@@ -650,13 +648,11 @@
       var apply = function (posterUrl) {
         m.start = st.start > 0.05 ? round1(st.start) : '';
         m.end = st.end < st.dur - 0.05 ? round1(st.end) : '';
-        if (st.landscape && st.vertical) {
-          m.vertical = true;
-          m.vx = Math.round(st.vx);
-          m.frame = { x: m.vx, y: 50, z: 1 };
-        } else if (m.vertical) {
-          delete m.vertical; delete m.vx;
+        if (st.landscape) {
+          var fr = S.normFrame(m.frame);
+          m.frame = { x: Math.round(st.vx), y: fr.y, z: fr.z };
         }
+        delete m.vertical; delete m.vx;
         if (posterUrl) { m.poster = posterUrl; m.posterTime = st.posterTime; }
         close();
         onDone();
@@ -1259,7 +1255,7 @@
         textField(sec, 'phone', 'Телефон'),
         textField(sec, 'email', 'E-mail', { type: 'email' }),
         textField(sec, 'telegram', 'Telegram', { placeholder: '@имя или ссылка' }),
-        textField(sec, 'vk', 'ВКонтакте', { placeholder: 'адрес страницы' }),
+        textField(sec, 'max', 'MAX', { placeholder: 'ссылка на профиль или номер', hint: 'Ссылку на свой профиль можно скопировать в приложении MAX. Если указать номер, он покажется текстом.', name: 'contact-max' }),
         textField(sec, 'place', 'Где работаю'),
         h('p', { className: 'muted', text: 'Пустые поля на сайте не показываются.' })
       ]));

@@ -203,9 +203,8 @@ body.modal-open { overflow: hidden; }
 .vframe.is-vertical .vwin { display: block; }
 .vframe.is-vertical:active .vwin { cursor: grabbing; }
 .vwin:focus-visible { outline-color: #fff; }
-.vvert { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: #20232a; font-weight: 500; }
-.vvert input { margin-top: 3px; flex: none; }
-.vvert small { display: block; margin-top: 2px; font-size: 13px; }
+.vvert { margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: #20232a; }
+.vvert small { display: block; margin-top: 4px; font-size: 13px; line-height: 1.4; }
 .vtl { position: relative; height: 62px; margin: 0 22px; border-radius: 10px; background: #2a2d35; touch-action: none; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .vstrip { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
 .vshade { position: absolute; top: 0; bottom: 0; background: rgba(0, 0, 0, 0.62); pointer-events: none; }
