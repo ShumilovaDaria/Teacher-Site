@@ -621,6 +621,63 @@ test('Цвета внутренних плашек и карточек', async (
   await context.close();
 });
 
+test('Редактор видео: ползунки начала и конца, просмотр, обложка', async (b) => {
+  const { page, context, db } = await newPage(b);
+  await loginOk(page);
+  await menu(page, 'Фотографии');
+  await page.click('.item-title:has-text("Подготовка к школе")');
+  // первое видео альбома: video-01, около 9 секунд
+  await page.click('.media-card >> nth=4 >> [data-action="video-edit"]');
+  await page.waitForSelector('.vmodal[data-ready]');
+  const tl = await page.locator('.vtl').boundingBox();
+  const drag = async (sel, frac) => {
+    const h = await page.locator(sel).boundingBox();
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tl.x + tl.width * frac, h.y + h.height / 2, { steps: 6 });
+    await page.mouse.up();
+  };
+  await drag('.vh-start', 0.2);
+  await drag('.vh-end', 0.32);
+  const [s, e] = await page.$$eval('.vhandle', (els) => els.map((x) => Number(x.getAttribute('aria-valuenow'))));
+  assert(s > 1.4 && s < 2.2 && e > 2.5 && e < 3.3, 'ползунки: ' + s + ' / ' + e);
+  // кадр обложки: клик по ленте посередине выбранного куска
+  await page.mouse.click(tl.x + tl.width * 0.26, tl.y + tl.height / 2);
+  await page.click('[data-action="poster"]');
+  await page.waitForFunction(() => document.querySelector('.vposter-img') && !document.querySelector('.vposter-img').hidden);
+  // просмотр: играет выбранный кусок и останавливается в конце
+  await page.click('[data-action="preview"]');
+  await page.waitForFunction(() => { const v = document.querySelector('.vplayer'); return !v.paused && v.currentTime > 0; }, null, { timeout: 8000 });
+  await page.waitForFunction((end) => { const v = document.querySelector('.vplayer'); return v.paused && Math.abs(v.currentTime - end) < 0.3; }, e, { timeout: 8000 });
+  await page.click('[data-action="done"]');
+  await page.waitForSelector('.vmodal', { state: 'detached' });
+  assert((await page.textContent('.media-card >> nth=4')).includes('Обрезано'), 'нет пометки об обрезке');
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  const v = db.content.sections.find((x) => x.id === 'photos').albums[0].items.find((x) => x.id === 'pod-video-01');
+  assert(Math.abs(v.start - s) < 0.11 && Math.abs(v.end - e) < 0.11, 'обрезка не сохранена: ' + v.start + ' / ' + v.end);
+  assert(v.src === 'assets/media/podgotovka/video-01.mp4', 'файл видео не должен меняться');
+  assert(v.poster.startsWith(SB + '/storage/v1/object/public/media/uploads/') && v.poster.endsWith('.jpg'), 'обложка ' + v.poster);
+  assert(v.posterTime > s && v.posterTime < e, 'кадр обложки ' + v.posterTime);
+  const key = v.poster.split('/public/media/')[1];
+  assert(db.files[key] && db.files[key].type === 'image/jpeg' && db.files[key].body.length > 5000, 'файл обложки пустой');
+  await context.close();
+});
+
+test('Сайт: обрезанное видео играет только выбранный кусок, в сетке видна обложка', async (b) => {
+  const content = clone(DEFAULT);
+  const vid = content.sections.find((x) => x.id === 'photos').albums[0].items.find((x) => x.id === 'pod-video-01');
+  vid.start = 2; vid.end = 3; vid.poster = 'assets/media/podgotovka/photo-02.jpg';
+  const { page, context } = await newPage(b, { content });
+  await openSite(page);
+  const tile = page.locator('[data-album-panel="0"] .media-tile >> nth=4');
+  assert((await tile.locator('img').getAttribute('src')).endsWith('photo-02.jpg'), 'в сетке не обложка');
+  await tile.click();
+  await page.waitForFunction(() => { const v = document.querySelector('.lightbox video'); return v && !v.paused && v.currentTime >= 1.9; }, null, { timeout: 8000 });
+  await page.waitForFunction(() => { const v = document.querySelector('.lightbox video'); return v.paused && v.currentTime >= 2.9 && v.currentTime < 3.4; }, null, { timeout: 8000 });
+  await context.close();
+});
+
 test('Цвета текста и деталей, цвет текста блока', async (b) => {
   const { page, context, db } = await newPage(b);
   await loginOk(page);

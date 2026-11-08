@@ -291,21 +291,38 @@
     var src = S.safeMediaUrl(it.src);
     var html;
     if (it.type === 'video') {
-      var frag = '';
-      var st = Number(it.start) || 0, en = Number(it.end) || 0;
-      if (st || en) frag = '#t=' + st + (en > st ? ',' + en : '');
       var poster = S.safeMediaUrl(it.poster);
-      html = '<video controls autoplay playsinline preload="auto" src="' + esc(src + frag) + '"' + (poster ? ' poster="' + esc(poster) + '"' : '') + '></video>';
+      html = '<video controls playsinline preload="auto" src="' + esc(src) + '"' + (poster ? ' poster="' + esc(poster) + '"' : '') + '></video>';
     } else {
       html = '<img src="' + esc(src) + '" alt="' + esc(it.caption || '') + '">';
     }
     fig.innerHTML = html + (has(it.caption) ? '<figcaption>' + esc(it.caption) + '</figcaption>' : '');
     var video = fig.querySelector('video');
-    if (video) playVideo(video);
+    if (video) trimVideo(video, Number(it.start) || 0, Number(it.end) || 0);
     var many = lbState.list.length > 1;
     lb.querySelector('.lb-count').textContent = many ? (lbState.index + 1) + ' из ' + lbState.list.length : '';
     lb.querySelector('.lb-prev').hidden = !many;
     lb.querySelector('.lb-next').hidden = !many;
+  }
+
+  // Обрезка из админки: видео идёт от start до end и останавливается в конце; повторное нажатие «плей» начинает с start.
+  // Делается скриптом, а не #t=, потому что Safari на iPhone понимает #t= ненадёжно
+  function trimVideo(video, start, end) {
+    var begin = function () {
+      if (start && video.currentTime < start - 0.05) video.currentTime = start;
+    };
+    video.addEventListener('loadedmetadata', function () {
+      if (start) video.currentTime = start;
+      playVideo(video);
+    }, { once: true });
+    video.addEventListener('play', function () {
+      if (end && video.currentTime >= end - 0.05) video.currentTime = start;
+      begin();
+    });
+    video.addEventListener('timeupdate', function () {
+      if (end && video.currentTime >= end) { video.pause(); video.currentTime = end; }
+    });
+    video.addEventListener('ended', function () { if (start) video.currentTime = start; });
   }
 
   // Видео запускается сразу; если браузер запретил звук, играет без звука

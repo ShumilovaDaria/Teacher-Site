@@ -356,7 +356,7 @@
     var start = S.clone(f);
     box.className = 'crop-box ' + shape;
     box.innerHTML = '';
-    var el = frameImg({ src: media.src, poster: isVideo ? '' : media.poster, frame: f, start: media.start }, isVideo);
+    var el = frameImg({ src: media.src, poster: media.poster, frame: f, start: media.start }, isVideo);
     if (!el) return;
     box.appendChild(el);
     zoom.value = f.z;
@@ -384,6 +384,242 @@
     document.addEventListener('keydown', onKey);
     modal.hidden = false;
     $('cropOk').focus();
+  }
+
+  /* ---------- редактор видео: обрезка и обложка ---------- */
+
+  function fmtTime(s) {
+    s = Math.max(0, s || 0);
+    var m = Math.floor(s / 60);
+    var r = s - m * 60;
+    return m + ':' + (r < 10 ? '0' : '') + r.toFixed(1);
+  }
+
+  function round1(x) { return Math.round(x * 10) / 10; }
+
+  // Видео с другого адреса (Supabase) нужно грузить с CORS, иначе кадр нельзя взять в canvas
+  function corsVideo(v, src) {
+    if (/^https?:/i.test(src) && src.indexOf(location.origin) !== 0) v.crossOrigin = 'anonymous';
+    v.src = src;
+  }
+
+  var MIN_CLIP = 0.5;
+
+  // Как в галерее iPhone: лента кадров, жёлтая рамка с ручками начала и конца, просмотр результата, выбор обложки
+  function openVideoEditor(m, onDone) {
+    var src = previewSrc(m.src);
+    if (!src) return;
+    var st = { start: Number(m.start) || 0, end: Number(m.end) || 0, dur: 0, posterBlob: null, posterUrl: previewSrc(m.poster) || '', posterTime: m.posterTime };
+    var playing = false, raf = 0;
+
+    var video = h('video', { className: 'vplayer', playsinline: true, preload: 'auto' });
+    video.playsInline = true;
+    corsVideo(video, src);
+    var strip = h('canvas', { className: 'vstrip' });
+    var shadeL = h('div', { className: 'vshade' });
+    var shadeR = h('div', { className: 'vshade' });
+    var handleL = h('div', { className: 'vhandle vh-start', role: 'slider', tabindex: '0', 'aria-label': 'Начало видео' });
+    var handleR = h('div', { className: 'vhandle vh-end', role: 'slider', tabindex: '0', 'aria-label': 'Конец видео' });
+    var sel = h('div', { className: 'vsel' }, [handleL, handleR]);
+    var head = h('div', { className: 'vhead' });
+    var pmark = h('div', { className: 'vpmark', title: 'Кадр обложки' });
+    var tl = h('div', { className: 'vtl', 'data-field': 'video-timeline' }, [strip, shadeL, shadeR, sel, pmark, head]);
+    var playBtn = h('button', { type: 'button', className: 'btn primary', 'data-action': 'preview' });
+    var muteBtn = h('button', { type: 'button', className: 'btn ghost small' });
+    var times = h('div', { className: 'vtimes' });
+    var posterImg = h('img', { className: 'vposter-img', alt: 'Обложка видео' });
+    var posterEmpty = h('span', { className: 'vposter-empty', text: 'Обложка не выбрана' });
+    var shotBtn = h('button', { type: 'button', className: 'btn', text: 'Сделать обложкой этот кадр', 'data-action': 'poster' });
+    var okBtn = h('button', { type: 'button', className: 'btn primary', text: 'Готово', 'data-action': 'done' });
+    var modal = h('div', { className: 'modal vmodal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Редактор видео' }, [
+      h('div', { className: 'modal-card vcard' }, [
+        h('h2', { text: 'Видео: обрезка и обложка' }),
+        h('div', { className: 'vstage' }, [video]),
+        tl,
+        h('div', { className: 'vrow' }, [playBtn, muteBtn, times]),
+        h('p', { className: 'muted vhint', text: 'Тяните жёлтые края ленты, чтобы выбрать начало и конец. Нажмите на ленту, чтобы перейти к кадру.' }),
+        h('div', { className: 'vposter' }, [
+          h('div', { className: 'vposter-box' }, [posterImg, posterEmpty]),
+          h('div', {}, [h('strong', { text: 'Обложка' }),
+            h('p', { className: 'muted', text: 'Этот кадр посетители увидят в галерее до запуска видео. Выберите кадр на ленте и нажмите кнопку.' }), shotBtn])
+        ]),
+        h('div', { className: 'row-end' }, [
+          h('button', { type: 'button', className: 'btn ghost', text: 'Сбросить обрезку', onclick: function () { st.start = 0; st.end = st.dur; seek(0); layout(); } }),
+          h('button', { type: 'button', className: 'btn ghost', text: 'Отмена', onclick: close }),
+          okBtn
+        ])
+      ])
+    ]);
+    document.body.appendChild(modal);
+    document.body.classList.add('modal-open');
+
+    function pct(t) { return st.dur ? t / st.dur * 100 : 0; }
+    function layout() {
+      shadeL.style.cssText = 'left:0;width:' + pct(st.start) + '%';
+      shadeR.style.cssText = 'left:' + pct(st.end) + '%;right:0';
+      sel.style.cssText = 'left:' + pct(st.start) + '%;width:' + (pct(st.end) - pct(st.start)) + '%';
+      handleL.setAttribute('aria-valuenow', round1(st.start)); handleL.setAttribute('aria-valuetext', fmtTime(st.start));
+      handleR.setAttribute('aria-valuenow', round1(st.end)); handleR.setAttribute('aria-valuetext', fmtTime(st.end));
+      times.textContent = fmtTime(st.start) + ' – ' + fmtTime(st.end) + '  ·  ' + (st.end - st.start).toFixed(1).replace('.', ',') + ' с';
+      pmark.hidden = !(st.posterTime >= 0 && st.dur);
+      pmark.style.left = pct(st.posterTime || 0) + '%';
+      playBtn.textContent = playing ? '❚❚ Пауза' : '▶ Просмотр';
+      muteBtn.textContent = video.muted ? 'Звук выкл.' : 'Звук вкл.';
+      posterImg.hidden = !st.posterUrl;
+      posterEmpty.hidden = !!st.posterUrl;
+      if (st.posterUrl) posterImg.src = st.posterUrl;
+      drawHead();
+    }
+    function drawHead() { head.style.left = pct(video.currentTime || 0) + '%'; }
+    function seek(t) { video.currentTime = Math.max(0, Math.min(st.dur || 0, t)); drawHead(); }
+
+    // предпросмотр: только выбранный отрезок, остановка на конце
+    function tick() {
+      drawHead();
+      if (playing && video.currentTime >= st.end - 0.03) { stop(); seek(st.end); }
+      if (playing) raf = requestAnimationFrame(tick);
+    }
+    function stop() { playing = false; video.pause(); cancelAnimationFrame(raf); layout(); }
+    playBtn.addEventListener('click', function () {
+      if (playing) { stop(); return; }
+      if (video.currentTime < st.start || video.currentTime >= st.end - 0.05) video.currentTime = st.start;
+      playing = true;
+      var p = video.play();
+      if (p && p.catch) p.catch(function () { video.muted = true; video.play().catch(function () { stop(); }); });
+      layout();
+      raf = requestAnimationFrame(tick);
+    });
+    muteBtn.addEventListener('click', function () { video.muted = !video.muted; layout(); });
+
+    // перетаскивание ручек и переход по ленте
+    function timeAt(clientX) {
+      var r = tl.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * st.dur;
+    }
+    var drag = null;
+    tl.addEventListener('pointerdown', function (e) {
+      if (!st.dur) return;
+      e.preventDefault();
+      if (playing) stop();
+      drag = e.target === handleL ? 'start' : e.target === handleR ? 'end' : 'seek';
+      try { tl.setPointerCapture(e.pointerId); } catch (err) { /* без захвата */ }
+      moveTo(e.clientX);
+    });
+    tl.addEventListener('pointermove', function (e) { if (drag) moveTo(e.clientX); });
+    tl.addEventListener('pointerup', function () { drag = null; });
+    tl.addEventListener('pointercancel', function () { drag = null; });
+    function moveTo(x) {
+      var t = timeAt(x);
+      if (drag === 'start') { st.start = Math.min(t, st.end - MIN_CLIP); seek(st.start); }
+      else if (drag === 'end') { st.end = Math.max(t, st.start + MIN_CLIP); seek(st.end); }
+      else seek(t);
+      layout();
+    }
+    function keyMove(which) {
+      return function (e) {
+        var d = { ArrowLeft: -0.1, ArrowDown: -0.1, ArrowRight: 0.1, ArrowUp: 0.1 }[e.key];
+        if (!d) return;
+        e.preventDefault();
+        if (e.shiftKey) d *= 10;
+        if (which === 'start') { st.start = Math.max(0, Math.min(st.start + d, st.end - MIN_CLIP)); seek(st.start); }
+        else { st.end = Math.min(st.dur, Math.max(st.end + d, st.start + MIN_CLIP)); seek(st.end); }
+        layout();
+      };
+    }
+    handleL.addEventListener('keydown', keyMove('start'));
+    handleR.addEventListener('keydown', keyMove('end'));
+
+    // обложка: текущий кадр в JPEG (загрузится только по «Готово»)
+    shotBtn.addEventListener('click', function () {
+      if (playing) stop();
+      try {
+        var k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+        var c = document.createElement('canvas');
+        c.width = Math.round(video.videoWidth * k); c.height = Math.round(video.videoHeight * k);
+        c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+        c.toBlob(function (b) {
+          if (!b) { toast('Не удалось взять кадр', true); return; }
+          st.posterBlob = b;
+          st.posterUrl = URL.createObjectURL(b);
+          st.posterTime = round1(video.currentTime);
+          layout();
+          toast('Обложка выбрана. Нажмите «Готово».');
+        }, 'image/jpeg', 0.85);
+      } catch (err) {
+        toast('Браузер не дал взять кадр из этого видео. Попробуйте загрузить видео заново.', true);
+      }
+    });
+
+    // лента кадров: отдельное видео перематывается по точкам и рисует миниатюры
+    function drawStrip() {
+      var w = tl.clientWidth, hh = tl.clientHeight, dpr = window.devicePixelRatio || 1;
+      strip.width = Math.round(w * dpr); strip.height = Math.round(hh * dpr);
+      var ctx = strip.getContext('2d');
+      var aspect = (video.videoWidth || 16) / (video.videoHeight || 9);
+      var fw = hh * dpr * aspect;
+      var n = Math.max(1, Math.ceil(strip.width / fw));
+      var v2 = document.createElement('video');
+      v2.muted = true; v2.preload = 'auto'; v2.playsInline = true;
+      corsVideo(v2, src);
+      var i = 0;
+      function next() {
+        if (i >= n || !document.body.contains(modal)) { v2.removeAttribute('src'); v2.load(); return; }
+        v2.currentTime = Math.min(st.dur - 0.05, (i + 0.5) * st.dur / n);
+      }
+      v2.addEventListener('seeked', function () {
+        try { ctx.drawImage(v2, i * fw, 0, fw, strip.height); } catch (err) { i = n; }
+        i++; next();
+      });
+      v2.addEventListener('loadeddata', next, { once: true });
+    }
+
+    video.addEventListener('loadedmetadata', function () {
+      st.dur = video.duration || 0;
+      if (!st.end || st.end > st.dur) st.end = st.dur;
+      st.start = Math.min(st.start, Math.max(0, st.end - MIN_CLIP));
+      seek(st.posterTime >= 0 ? st.posterTime : st.start);
+      layout();
+      drawStrip();
+      modal.setAttribute('data-ready', '1');
+    });
+    video.addEventListener('timeupdate', drawHead);
+    video.addEventListener('error', function () { toast('Видео не открывается', true); });
+
+    function close() {
+      stop();
+      document.removeEventListener('keydown', onKey);
+      video.removeAttribute('src'); video.load();
+      modal.remove();
+      document.body.classList.remove('modal-open');
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') close();
+      if (e.key === ' ' && e.target === document.body) { e.preventDefault(); playBtn.click(); }
+    }
+    document.addEventListener('keydown', onKey);
+
+    okBtn.addEventListener('click', function () {
+      if (!st.dur) { close(); return; }
+      var apply = function (posterUrl) {
+        m.start = st.start > 0.05 ? round1(st.start) : '';
+        m.end = st.end < st.dur - 0.05 ? round1(st.end) : '';
+        if (posterUrl) { m.poster = posterUrl; m.posterTime = st.posterTime; }
+        close();
+        onDone();
+      };
+      if (!st.posterBlob) { apply(null); return; }
+      okBtn.disabled = true; okBtn.textContent = 'Сохраняю обложку…';
+      backend.upload(st.posterBlob, fileName('poster', 'jpg')).then(function (url) {
+        if (MODE !== 'demo') state.previews[url] = st.posterUrl;
+        apply(url);
+      }).catch(function (e) {
+        okBtn.disabled = false; okBtn.textContent = 'Готово';
+        toast('Не удалось загрузить обложку: ' + (e.message || ''), true);
+      });
+    });
+
+    layout();
+    playBtn.focus();
   }
 
   /* ---------- поля форм ---------- */
@@ -758,14 +994,10 @@
           card.appendChild(cap);
         }
         if (isVideo) {
-          var tr = h('details', {}, [h('summary', { text: 'Обрезать по времени' })]);
-          var st = h('input', { type: 'number', min: '0', step: '0.5', placeholder: 'Начало, сек' });
-          var en = h('input', { type: 'number', min: '0', step: '0.5', placeholder: 'Конец, сек' });
-          st.value = m.start || ''; en.value = m.end || '';
-          st.addEventListener('input', function () { m.start = st.value === '' ? '' : Number(st.value); markDirty(); });
-          en.addEventListener('input', function () { m.end = en.value === '' ? '' : Number(en.value); markDirty(); });
-          tr.appendChild(st); tr.appendChild(en);
-          card.appendChild(tr);
+          var trimmed = Number(m.start) > 0 || Number(m.end) > 0;
+          card.appendChild(h('button', { type: 'button', className: 'btn small vedit-btn', 'data-action': 'video-edit',
+            text: 'Обрезка и обложка', onclick: function () { openVideoEditor(m, function () { markDirty(); draw(); }); } }));
+          if (trimmed) card.appendChild(h('span', { className: 'muted vtrim-note', text: 'Обрезано: ' + fmtTime(Number(m.start) || 0) + ' – ' + (Number(m.end) ? fmtTime(m.end) : 'конец') }));
         }
         grid.appendChild(card);
       });
