@@ -258,15 +258,28 @@
       var st = Number(it.start) || 0, en = Number(it.end) || 0;
       if (st || en) frag = '#t=' + st + (en > st ? ',' + en : '');
       var poster = S.safeMediaUrl(it.poster);
-      html = '<video controls playsinline preload="metadata" src="' + esc(src + frag) + '"' + (poster ? ' poster="' + esc(poster) + '"' : '') + '></video>';
+      html = '<video controls autoplay playsinline preload="auto" src="' + esc(src + frag) + '"' + (poster ? ' poster="' + esc(poster) + '"' : '') + '></video>';
     } else {
       html = '<img src="' + esc(src) + '" alt="' + esc(it.caption || '') + '">';
     }
     fig.innerHTML = html + (has(it.caption) ? '<figcaption>' + esc(it.caption) + '</figcaption>' : '');
+    var video = fig.querySelector('video');
+    if (video) playVideo(video);
     var many = lbState.list.length > 1;
     lb.querySelector('.lb-count').textContent = many ? (lbState.index + 1) + ' из ' + lbState.list.length : '';
     lb.querySelector('.lb-prev').hidden = !many;
     lb.querySelector('.lb-next').hidden = !many;
+  }
+
+  // Видео запускается сразу; если браузер запретил звук, играет без звука
+  function playVideo(video) {
+    var p = video.play();
+    if (p && p.catch) {
+      p.catch(function () {
+        video.muted = true;
+        video.play().catch(function () { /* пользователь нажмёт «плей» сам */ });
+      });
+    }
   }
 
   function step(d) {

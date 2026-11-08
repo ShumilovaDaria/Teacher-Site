@@ -225,7 +225,11 @@ test('Фотографии: сначала фото, потом видео; пу
   await page.click('#photos .chip:has-text("Подготовка к школе")');
   await page.click('[data-album-panel="0"] .media-tile >> nth=5');
   await page.waitForSelector('.lightbox.open video');
+  await page.waitForFunction(() => { const v = document.querySelector('.lightbox video'); return v && !v.paused && v.currentTime > 0; }, null, { timeout: 10000 });
+  await page.click('.lb-next');
+  await page.waitForFunction(() => { const v = document.querySelector('.lightbox video'); return v && !v.paused && v.currentTime > 0; }, null, { timeout: 10000 });
   await page.keyboard.press('Escape');
+  assert(!(await page.$('.lightbox video')), 'видео не остановлено после закрытия');
   await context.close();
 });
 
