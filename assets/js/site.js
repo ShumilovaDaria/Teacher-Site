@@ -155,7 +155,7 @@
       html += albums.map(function (a, i) {
         var items = visible(a.items).filter(function (m) { return S.safeMediaUrl(m.src); });
         var key = ctx.addGallery(items.map(function (m) {
-          return { type: m.type === 'video' ? 'video' : 'photo', src: m.src, poster: m.poster, caption: m.caption, start: m.start, end: m.end };
+          return { type: m.type === 'video' ? 'video' : 'photo', src: m.src, poster: m.poster, caption: m.caption, start: m.start, end: m.end, vertical: !!m.vertical, vx: m.vx };
         }));
         var grid = items.length ? '<div class="media-grid">' + items.map(function (m, j) {
           var inner;
@@ -293,6 +293,11 @@
     if (it.type === 'video') {
       var poster = S.safeMediaUrl(it.poster);
       html = '<video controls playsinline preload="auto" src="' + esc(src) + '"' + (poster ? ' poster="' + esc(poster) + '"' : '') + '></video>';
+      // горизонтальное видео, для которого в админке выбрана вертикальная часть
+      if (it.vertical) {
+        var vx = Math.max(0, Math.min(100, Number(it.vx) || 50));
+        html = '<div class="lb-vert" style="--vx:' + vx + '%">' + html + '</div>';
+      }
     } else {
       html = '<img src="' + esc(src) + '" alt="' + esc(it.caption || '') + '">';
     }

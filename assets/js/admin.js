@@ -409,12 +409,52 @@
   function openVideoEditor(m, onDone) {
     var src = previewSrc(m.src);
     if (!src) return;
-    var st = { start: Number(m.start) || 0, end: Number(m.end) || 0, dur: 0, posterBlob: null, posterUrl: previewSrc(m.poster) || '', posterTime: m.posterTime };
+    var st = { start: Number(m.start) || 0, end: Number(m.end) || 0, dur: 0, posterBlob: null, posterUrl: previewSrc(m.poster) || '', posterTime: m.posterTime,
+      vertical: !!m.vertical, vx: m.vx >= 0 ? Number(m.vx) : 50, landscape: false };
     var playing = false, raf = 0;
 
     var video = h('video', { className: 'vplayer', playsinline: true, preload: 'auto' });
     video.playsInline = true;
     corsVideo(video, src);
+    // вертикальное окно 9:16 поверх горизонтального видео; тянется влево и вправо
+    var vwin = h('div', { className: 'vwin', 'data-field': 'vertical-window', role: 'slider', tabindex: '0', 'aria-label': 'Положение вертикального кадра' });
+    vwin.addEventListener('keydown', function (e) {
+      var d = { ArrowLeft: -2, ArrowRight: 2 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      st.vx = Math.max(0, Math.min(100, st.vx + (e.shiftKey ? d * 5 : d)));
+      placeWin();
+    });
+    var vframe = h('div', { className: 'vframe' }, [video, vwin]);
+    var vertCb = h('input', { type: 'checkbox', 'data-field': 'vertical' });
+    var vertBox = h('label', { className: 'check vvert' }, [vertCb, h('span', {}, [h('strong', { text: 'Показывать вертикально' }),
+      h('small', { className: 'muted', text: ' Для горизонтального видео: на сайте оно откроется вертикально. Перетащите светлое окно на нужную часть кадра.' })])]);
+    vertCb.addEventListener('change', function () { st.vertical = vertCb.checked; layout(); });
+    function placeWin() {
+      if (!(st.vertical && st.landscape)) return;
+      var fw = vframe.clientWidth, fh = vframe.clientHeight;
+      var ww = Math.min(fw, fh * 9 / 16);
+      vwin.style.width = ww + 'px';
+      vwin.style.left = ((fw - ww) * st.vx / 100) + 'px';
+      vwin.setAttribute('aria-valuenow', Math.round(st.vx));
+    }
+    var vdrag = null;
+    vframe.addEventListener('pointerdown', function (e) {
+      if (!(st.vertical && st.landscape)) return;
+      e.preventDefault();
+      vdrag = { x: e.clientX, vx: st.vx };
+      try { vframe.setPointerCapture(e.pointerId); } catch (err) { /* без захвата */ }
+    });
+    vframe.addEventListener('pointermove', function (e) {
+      if (!vdrag) return;
+      var fw = vframe.clientWidth, ww = vwin.clientWidth;
+      if (fw - ww < 1) return;
+      st.vx = Math.max(0, Math.min(100, vdrag.vx + (e.clientX - vdrag.x) / (fw - ww) * 100));
+      placeWin();
+    });
+    vframe.addEventListener('pointerup', function () { vdrag = null; });
+    vframe.addEventListener('pointercancel', function () { vdrag = null; });
+    window.addEventListener('resize', placeWin);
     var strip = h('canvas', { className: 'vstrip' });
     var shadeL = h('div', { className: 'vshade' });
     var shadeR = h('div', { className: 'vshade' });
@@ -434,10 +474,11 @@
     var modal = h('div', { className: 'modal vmodal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Редактор видео' }, [
       h('div', { className: 'modal-card vcard' }, [
         h('h2', { text: 'Видео: обрезка и обложка' }),
-        h('div', { className: 'vstage' }, [video]),
+        h('div', { className: 'vstage' }, [vframe]),
         tl,
         h('div', { className: 'vrow' }, [playBtn, muteBtn, times]),
         h('p', { className: 'muted vhint', text: 'Тяните жёлтые края ленты, чтобы выбрать начало и конец. Нажмите на ленту, чтобы перейти к кадру.' }),
+        vertBox,
         h('div', { className: 'vposter' }, [
           h('div', { className: 'vposter-box' }, [posterImg, posterEmpty]),
           h('div', {}, [h('strong', { text: 'Обложка' }),
@@ -465,6 +506,10 @@
       pmark.style.left = pct(st.posterTime || 0) + '%';
       playBtn.textContent = playing ? '❚❚ Пауза' : '▶ Просмотр';
       muteBtn.textContent = video.muted ? 'Звук выкл.' : 'Звук вкл.';
+      vertBox.hidden = !st.landscape;
+      vertCb.checked = st.vertical;
+      vframe.classList.toggle('is-vertical', st.vertical && st.landscape);
+      placeWin();
       posterImg.hidden = !st.posterUrl;
       posterEmpty.hidden = !!st.posterUrl;
       if (st.posterUrl) posterImg.src = st.posterUrl;
@@ -577,6 +622,7 @@
       st.dur = video.duration || 0;
       if (!st.end || st.end > st.dur) st.end = st.dur;
       st.start = Math.min(st.start, Math.max(0, st.end - MIN_CLIP));
+      st.landscape = video.videoWidth > video.videoHeight;
       seek(st.posterTime >= 0 ? st.posterTime : st.start);
       layout();
       drawStrip();
@@ -588,6 +634,7 @@
     function close() {
       stop();
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', placeWin);
       video.removeAttribute('src'); video.load();
       modal.remove();
       document.body.classList.remove('modal-open');
@@ -603,6 +650,13 @@
       var apply = function (posterUrl) {
         m.start = st.start > 0.05 ? round1(st.start) : '';
         m.end = st.end < st.dur - 0.05 ? round1(st.end) : '';
+        if (st.landscape && st.vertical) {
+          m.vertical = true;
+          m.vx = Math.round(st.vx);
+          m.frame = { x: m.vx, y: 50, z: 1 };
+        } else if (m.vertical) {
+          delete m.vertical; delete m.vx;
+        }
         if (posterUrl) { m.poster = posterUrl; m.posterTime = st.posterTime; }
         close();
         onDone();

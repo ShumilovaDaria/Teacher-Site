@@ -664,6 +664,97 @@ test('Редактор видео: ползунки начала и конца, 
   await context.close();
 });
 
+test('Горизонтальное видео: выбор вертикальной части', async (b) => {
+  const { page, context, db } = await newPage(b);
+  await loginOk(page);
+  await menu(page, 'Фотографии');
+  await page.click('.item-title:has-text("Подготовка к школе")');
+  // video-03 вертикальное: переключателя быть не должно
+  await page.click('.media-card >> nth=6 >> [data-action="video-edit"]');
+  await page.waitForSelector('.vmodal[data-ready]');
+  assert(await page.isHidden('.vvert'), 'у вертикального видео есть переключатель');
+  await page.click('.vmodal button:has-text("Отмена")');
+  // video-01 горизонтальное
+  await page.click('.media-card >> nth=4 >> [data-action="video-edit"]');
+  await page.waitForSelector('.vmodal[data-ready]');
+  assert(await page.isVisible('.vvert'), 'нет переключателя для горизонтального видео');
+  await page.check('[data-field="vertical"]');
+  const win = await page.locator('.vwin').boundingBox();
+  const frame = await page.locator('.vframe').boundingBox();
+  assert(Math.abs(win.width / win.height - 9 / 16) < 0.02, 'окно не 9:16');
+  assert(Math.abs(win.x + win.width / 2 - (frame.x + frame.width / 2)) < 3, 'окно не по центру');
+  await page.mouse.move(win.x + win.width / 2, win.y + win.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(win.x + win.width / 2 + 2000, win.y + win.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const win2 = await page.locator('.vwin').boundingBox();
+  assert(Math.abs(win2.x + win2.width - (frame.x + frame.width)) < 2, 'окно не дошло до правого края');
+  await page.click('[data-action="done"]');
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  const v = db.content.sections.find((x) => x.id === 'photos').albums[0].items.find((x) => x.id === 'pod-video-01');
+  assert(v.vertical === true && v.vx === 100 && v.frame.x === 100, 'не сохранено: ' + JSON.stringify([v.vertical, v.vx, v.frame]));
+
+  const site = await context.newPage();
+  await openSite(site);
+  await site.click('[data-album-panel="0"] .media-tile >> nth=4');
+  await site.waitForSelector('.lightbox.open .lb-vert video');
+  const r = await site.evaluate(() => {
+    const box = document.querySelector('.lb-vert').getBoundingClientRect();
+    return [box.width / box.height, getComputedStyle(document.querySelector('.lb-vert video')).objectPosition];
+  });
+  assert(Math.abs(r[0] - 9 / 16) < 0.02, 'на сайте не вертикально: ' + r[0]);
+  assert(r[1] === '100% 50%', 'не та часть кадра: ' + r[1]);
+  await context.close();
+});
+
+test('Телефон: кнопки в альбоме и редакторе видео не наезжают друг на друга', async (b) => {
+  const overlaps = () => {
+    const els = [...document.querySelectorAll('button, .btn, input, textarea, .grip, .swatch')].filter((e) => {
+      const r = e.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0) || r.bottom < 0 || r.top > innerHeight || e.closest('[hidden]') || e.closest('.side:not(.open)')) return false;
+      const top = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + 4)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+      return !!top && (top === e || e.contains(top));
+    });
+    const out = [];
+    const vw = document.documentElement.clientWidth;
+    els.forEach((a, i) => {
+      const ra = a.getBoundingClientRect();
+      if (ra.right > vw + 1 || ra.left < -1) out.push('за краем: ' + (a.textContent || a.className).trim().slice(0, 20));
+      for (let j = i + 1; j < els.length; j++) {
+        const bb = els[j]; if (a.contains(bb) || bb.contains(a)) continue;
+        const rb = bb.getBoundingClientRect();
+        if (Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left) > 2 && Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top) > 2) {
+          out.push((a.textContent || a.className).trim().slice(0, 20) + ' / ' + (bb.textContent || bb.className).trim().slice(0, 20));
+        }
+      }
+    });
+    return out;
+  };
+  for (const w of [320, 375]) {
+    const { page, context } = await newPage(b, { viewport: { width: w, height: 760 }, hasTouch: true });
+    await loginOk(page);
+    await page.click('#menuBtn');
+    await menu(page, 'Фотографии');
+    await page.click('.item-title:has-text("Подготовка к школе")');
+    for (const n of [0, 4, 8]) {
+      await page.locator('.media-card').nth(n).scrollIntoViewIfNeeded();
+      const o = await page.evaluate(overlaps);
+      assert(!o.length, w + 'px, альбом: ' + o.slice(0, 3).join('; '));
+    }
+    await page.click('.media-card >> nth=4 >> [data-action="video-edit"]');
+    await page.waitForSelector('.vmodal[data-ready]');
+    await page.check('[data-field="vertical"]');
+    for (const sel of ['.vtl', '.vposter', '.vcard > .row-end']) {
+      await page.locator(sel).scrollIntoViewIfNeeded();
+      const o = await page.evaluate(overlaps);
+      assert(!o.length, w + 'px, редактор: ' + o.slice(0, 3).join('; '));
+    }
+    assert(await page.evaluate(() => document.documentElement.scrollWidth) <= w, 'горизонтальная прокрутка');
+    await context.close();
+  }
+});
+
 test('Сайт: обрезанное видео играет только выбранный кусок, в сетке видна обложка', async (b) => {
   const content = clone(DEFAULT);
   const vid = content.sections.find((x) => x.id === 'photos').albums[0].items.find((x) => x.id === 'pod-video-01');

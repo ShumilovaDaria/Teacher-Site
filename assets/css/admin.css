@@ -196,7 +196,16 @@ body.modal-open { overflow: hidden; }
 .vcard h2 { color: #fff; }
 .vcard .muted { color: #a9adb8; }
 .vstage { background: #000; border-radius: 12px; overflow: hidden; display: grid; place-items: center; margin: 12px 0; }
-.vplayer { display: block; width: 100%; max-height: 46vh; object-fit: contain; background: #000; }
+.vplayer { display: block; width: auto; height: auto; max-width: 100%; max-height: 46vh; background: #000; }
+/* рамка ровно по картинке видео: поверх неё ходит вертикальное окно */
+.vframe { position: relative; display: inline-block; line-height: 0; max-width: 100%; overflow: hidden; touch-action: none; }
+.vwin { display: none; position: absolute; top: 0; bottom: 0; box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.62); outline: 3px solid #f5c518; outline-offset: -3px; cursor: grab; border-radius: 4px; }
+.vframe.is-vertical .vwin { display: block; }
+.vframe.is-vertical:active .vwin { cursor: grabbing; }
+.vwin:focus-visible { outline-color: #fff; }
+.vvert { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: #20232a; font-weight: 500; }
+.vvert input { margin-top: 3px; flex: none; }
+.vvert small { display: block; margin-top: 2px; font-size: 13px; }
 .vtl { position: relative; height: 62px; margin: 0 22px; border-radius: 10px; background: #2a2d35; touch-action: none; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .vstrip { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; }
 .vshade { position: absolute; top: 0; bottom: 0; background: rgba(0, 0, 0, 0.62); pointer-events: none; }
@@ -225,7 +234,14 @@ body.modal-open { overflow: hidden; }
 .vcard .btn.primary { background: #f5c518; border-color: #f5c518; color: #16181d; }
 .vcard .btn.ghost { background: transparent; }
 .vcard > .row-end { position: sticky; bottom: -22px; margin: 16px -22px -22px; padding: 12px 22px; background: #16181d; border-top: 1px solid #2a2d35; }
-.vedit-btn { width: 100%; }
+.vedit-btn { width: 100%; white-space: normal; text-align: center; line-height: 1.2; }
+/* карточки фото и видео: всё содержимое умещается в колонку, кнопки переносятся, а не наезжают */
+.media-grid > * { min-width: 0; }
+.media-card { min-width: 0; overflow: hidden; }
+.media-card .tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.media-card .tools .icon-btn { flex: 1 1 auto; min-width: 0; }
+.media-card .tools .grip { flex: none; }
+.media-card textarea { max-width: 100%; min-width: 0; }
 .vtrim-note { font-size: 12.5px; }
 @media (max-width: 600px) {
   .vcard { padding: 16px 14px; }
@@ -233,6 +249,7 @@ body.modal-open { overflow: hidden; }
   .vposter { align-items: flex-start; }
   .vposter-box { width: 76px; }
   .vplayer { max-height: 38vh; }
+  .vvert { padding: 10px 12px; }
   .vcard > .row-end { bottom: -16px; margin: 14px -14px -16px; padding: 10px 14px; }
   .vtimes { margin-left: 0; width: 100%; }
 }
@@ -245,8 +262,11 @@ body.modal-open { overflow: hidden; }
   .side { position: fixed; inset: 0 auto 0 0; width: 270px; z-index: 50; transform: translateX(-100%); transition: transform 0.2s; }
   .side.open { transform: none; }
   .menu-btn { display: inline-flex; }
-  .bar { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
-  .bar h1 { font-size: 18px; }
+  .bar { padding: 8px 12px; gap: 4px 8px; flex-wrap: wrap; }
+  .bar h1 { font-size: 17px; order: 1; }
+  .bar .menu-btn { order: 0; min-height: 38px; padding: 6px 10px; }
+  #saveBtn { order: 2; min-height: 38px; padding: 6px 12px; }
+  .status { order: 3; flex-basis: 100%; font-size: 12.5px; }
   .view { padding: 16px; }
   .banner { margin: 12px 16px 0; }
   .item-head { flex-wrap: wrap; }
