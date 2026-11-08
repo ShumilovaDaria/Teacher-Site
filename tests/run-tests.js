@@ -219,10 +219,17 @@ test('В текстах нет длинных тире', async (b) => {
 test('Достижения: фильтр по категориям и лайтбокс', async (b) => {
   const { page, context } = await newPage(b);
   await openSite(page);
-  const visibleCards = () => page.$$eval('#achievements .ach', (els) => els.filter((e) => !e.hidden).length);
+  // считаем то, что реально видно на странице, а не атрибут hidden
+  const shown = () => page.$$eval('#achievements .ach', (els) => els.filter((e) => getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0)
+    .map((e) => e.getAttribute('data-category')));
+  const visibleCards = async () => (await shown()).length;
   assert(await visibleCards() === 8, 'всего должно быть 8');
   await page.click('#achievements .chip[data-filter="Спортивные"]');
-  assert(await visibleCards() === 4, 'спортивных должно быть 4');
+  const sport = await shown();
+  assert(sport.length === 4 && sport.every((c) => c === 'Спортивные'), 'видны не только спортивные: ' + sport.join(', '));
+  await page.click('#achievements .chip[data-filter="Профессиональные"]');
+  const prof = await shown();
+  assert(prof.length === 4 && prof.every((c) => c === 'Профессиональные'), 'видны не только профессиональные: ' + prof.join(', '));
   await page.click('#achievements .chip[data-filter=""]');
   assert(await visibleCards() === 8, 'фильтр «Все» не вернул карточки');
   await page.click('#achievements button.link-btn:has-text("Документы (2)")');

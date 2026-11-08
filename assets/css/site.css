@@ -67,6 +67,8 @@ body {
 @supports (overflow-x: clip) {
   body { overflow-x: clip; }
 }
+/* скрытое фильтром или вкладкой не показывается, даже если у элемента свой display */
+[hidden] { display: none !important; }
 img, video { max-width: 100%; display: block; }
 a { color: inherit; }
 h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.15; margin: 0; text-align: left; color: var(--t-heading); }
