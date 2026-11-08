@@ -120,7 +120,7 @@ function mockSupabase(opts = {}) {
 }
 
 async function newPage(browser, opts = {}) {
-  const context = await browser.newContext({ viewport: opts.viewport || { width: 1280, height: 900 }, acceptDownloads: true });
+  const context = await browser.newContext({ viewport: opts.viewport || { width: 1280, height: 900 }, acceptDownloads: true, hasTouch: !!opts.hasTouch });
   const mock = mockSupabase(opts);
   if (opts.config !== 'real') {
     await context.route('**/config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: opts.config || SB_CONFIG }));
@@ -156,6 +156,28 @@ async function loginOk(page) {
 
 async function menu(page, label) {
   await page.click(`#menu .menu-item:text-is("${label}")`);
+}
+
+// Зажать ручку и протащить мышью к верхней или нижней части цели
+async function dragTo(page, handle, target, where) {
+  await handle.scrollIntoViewIfNeeded();
+  const a = await handle.boundingBox();
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2 + 6, { steps: 2 });
+  const b = await target.boundingBox();
+  const y = where === 'before' ? b.y + b.height * 0.1 : b.y + b.height * 0.9;
+  await page.mouse.move(b.x + b.width / 2, y, { steps: 12 });
+  await page.mouse.up();
+}
+
+// То же пальцем (сенсорные события через протокол Chrome)
+async function touchDrag(page, from, to) {
+  const cdp = await page.context().newCDPSession(page);
+  const send = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+  await send('touchStart', from.x, from.y);
+  for (let k = 1; k <= 12; k++) await send('touchMove', from.x + (to.x - from.x) * k / 12, from.y + (to.y - from.y) * k / 12);
+  await send('touchEnd');
 }
 
 const tests = [];
@@ -425,7 +447,16 @@ test('Блоки страницы: скрыть, переставить, уда�
   await menu(page, 'Блоки страницы');
   const row = (title) => page.locator('.blocks .item', { has: page.locator('.block-name', { hasText: title }) });
   await row('Опыт работы').locator('button:has-text("Скрыть")').click();
-  await row('Контакты').locator('button[aria-label="Выше"]').click();
+  await dragTo(page, row('Контакты').locator('.grip'), row('Родителям'), 'before');
+  const order = await page.$$eval('.blocks .block-name', (els) => els.map((e) => e.firstChild.textContent));
+  assert(order.indexOf('Контакты') === order.indexOf('Родителям') - 1, 'перетаскивание блока: ' + order.join(', '));
+  // с клавиатуры: фокус на ручке и стрелка вниз
+  await row('Образование').locator('.grip').focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowUp');
+  const order2 = await page.$$eval('.blocks .block-name', (els) => els.map((e) => e.firstChild.textContent));
+  assert(order2.join() === order.join(), 'стрелки на ручке: ' + order2.join(', '));
+  assert(await page.evaluate(() => document.activeElement.classList.contains('grip')), 'фокус потерян после перестановки');
   page.once('dialog', (d) => d.accept());
   await row('Повышение квалификации').locator('button[aria-label="Удалить блок"]').click();
   assert(await row('Повышение квалификации').count() === 0, 'блок не удалён');
@@ -533,6 +564,27 @@ test('Демо-режим без базы: правки сохраняются �
   assert(src === 'demo', 'источник ' + src);
   assert((await page.textContent('h1')) === 'Демо имя', 'правка не видна');
   assert(await page.isVisible('.demo-bar'), 'нет пометки демо-режима');
+  await context.close();
+});
+
+test('Перетаскивание пальцем: фото в альбоме на телефоне', async (b) => {
+  const { page, context, db } = await newPage(b, { viewport: { width: 390, height: 844 }, hasTouch: true });
+  await loginOk(page);
+  await page.click('#menuBtn');
+  await menu(page, 'Фотографии');
+  await page.click('.item-title:has-text("Подготовка к школе")');
+  const cards = page.locator('.media-card');
+  // в две колонки: третье фото (второй ряд) тянем пальцем на место первого
+  await cards.nth(0).evaluate((e) => { e.scrollIntoView({ block: 'start' }); window.scrollBy(0, -80); });
+  const g = await cards.nth(2).locator('.grip').boundingBox();
+  const t = await cards.nth(0).boundingBox();
+  await touchDrag(page, { x: g.x + g.width / 2, y: g.y + g.height / 2 }, { x: t.x + 10, y: t.y + t.height * 0.15 });
+  await page.waitForTimeout(200);
+  await page.click('#saveBtn');
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
+  const items = db.content.sections.find((s) => s.id === 'photos').albums[0].items;
+  assert(items.slice(0, 3).map((m) => m.id).join() === 'pod-photo-03,pod-photo-01,pod-photo-02', 'порядок после перетаскивания ' + items.slice(0, 3).map((m) => m.id).join());
+  assert(items.length === 13, 'потерялись элементы');
   await context.close();
 });
 

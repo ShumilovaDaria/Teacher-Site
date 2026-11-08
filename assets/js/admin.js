@@ -538,7 +538,7 @@
       h('small', { className: 'hint', text: hint || 'Ссылка на страницу (https://…), почта (mailto:) или загруженный файл PDF, Word и т. п.' })]);
   }
 
-  // Список карточек: добавить, раскрыть, ↑↓, скрыть, удалить
+  // Список карточек: добавить, раскрыть, перетащить, скрыть, удалить
   function listField(arr, opts) {
     var wrap = h('div');
     var listEl = h('div', { className: 'list' });
@@ -554,12 +554,9 @@
         var titleBtn = h('button', { type: 'button', className: 'item-title', text: opts.title(item) || 'Без названия', 'aria-expanded': String(isOpen),
           onclick: function () { openIds[item.id] = !isOpen; draw(); } });
         var head = h('div', { className: 'item-head' }, [
+          grip(arr, i, '.item', opts.title(item), function () { draw(); }),
           titleBtn,
           item.hidden ? h('span', { className: 'badge', text: 'скрыто' }) : null,
-          h('button', { type: 'button', className: 'icon-btn', title: 'Выше', 'aria-label': 'Переместить выше', text: '↑', disabled: i === 0,
-            onclick: function () { move(arr, i, -1); markDirty(); draw(); } }),
-          h('button', { type: 'button', className: 'icon-btn', title: 'Ниже', 'aria-label': 'Переместить ниже', text: '↓', disabled: i === arr.length - 1,
-            onclick: function () { move(arr, i, 1); markDirty(); draw(); } }),
           opts.noHide ? null : h('button', { type: 'button', className: 'icon-btn', text: item.hidden ? 'Показать' : 'Скрыть',
             title: item.hidden ? 'Показать на сайте' : 'Скрыть на сайте', onclick: function () { item.hidden = !item.hidden; markDirty(); draw(); } }),
           h('button', { type: 'button', className: 'icon-btn del', title: 'Удалить', 'aria-label': 'Удалить', text: '✕', onclick: function () {
@@ -587,10 +584,122 @@
     return wrap;
   }
 
-  function move(arr, i, d) {
-    var j = i + d;
-    if (j < 0 || j >= arr.length) return;
-    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  /* ---------- перетаскивание ---------- */
+
+  var GRIP_SVG = '<svg viewBox="0 0 20 28" width="14" height="20" aria-hidden="true" fill="currentColor">' +
+    '<rect x="1" y="1" width="18" height="26" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>' +
+    '<circle cx="7" cy="8.5" r="1.7"/><circle cx="13" cy="8.5" r="1.7"/><circle cx="7" cy="14" r="1.7"/>' +
+    '<circle cx="13" cy="14" r="1.7"/><circle cx="7" cy="19.5" r="1.7"/><circle cx="13" cy="19.5" r="1.7"/></svg>';
+  var gripGroups = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+  var gripSeq = 0;
+
+  function moveTo(arr, from, to) { arr.splice(to, 0, arr.splice(from, 1)[0]); }
+
+  // Ручка слева от элемента: зажать и тянуть (мышь или палец) либо стрелки на клавиатуре.
+  // itemSelector: какой элемент тянем; redraw(newIndex): перерисовать список после перестановки
+  function grip(arr, index, itemSelector, label, redraw) {
+    var group = gripGroups && gripGroups.get(arr);
+    if (!group) { group = 'g' + (++gripSeq); if (gripGroups) gripGroups.set(arr, group); }
+    var b = h('button', { type: 'button', className: 'grip', title: 'Зажмите и перетащите', 'data-grip': String(index), 'data-group': group,
+      'aria-label': 'Переставить «' + (label || 'элемент') + '». Можно стрелками вверх и вниз' });
+    b.innerHTML = GRIP_SVG;
+    function done(to, focus) {
+      markDirty();
+      redraw(to);
+      if (focus) {
+        var g = document.querySelector('.grip[data-group="' + group + '"][data-grip="' + to + '"]');
+        if (g) g.focus();
+      }
+    }
+    b.addEventListener('keydown', function (e) {
+      var d = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      var to = index + d;
+      if (to < 0 || to >= arr.length) return;
+      moveTo(arr, index, to);
+      done(to, true);
+    });
+    b.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      startDrag(e, b, itemSelector, function (to) {
+        if (to === index) return;
+        moveTo(arr, index, to);
+        done(to, false);
+      });
+    });
+    return b;
+  }
+
+  function startDrag(e, handleEl, itemSelector, onDrop) {
+    var item = handleEl.closest(itemSelector);
+    if (!item) return;
+    var box = item.parentNode;
+    e.preventDefault();
+    try { handleEl.setPointerCapture(e.pointerId); } catch (err) { /* без захвата */ }
+    var r0 = item.getBoundingClientRect();
+    var grabX = e.clientX - r0.left, grabY = e.clientY - r0.top;
+    var px = e.clientX, py = e.clientY, active = false, raf = 0;
+
+    function siblings() {
+      return Array.prototype.filter.call(box.children, function (c) { return c.matches(itemSelector); });
+    }
+    function follow() {
+      item.style.transform = 'none';
+      var r = item.getBoundingClientRect();
+      item.style.transform = 'translate(' + (px - grabX - r.left) + 'px,' + (py - grabY - r.top) + 'px)';
+    }
+    // Элемент встаёт на новое место, когда палец или курсор переходит середину соседа
+    function reorder() {
+      var list = siblings();
+      var a = list.indexOf(item);
+      for (var k = 0; k < list.length; k++) {
+        var el = list[k];
+        if (el === item) continue;
+        var r = el.getBoundingClientRect();
+        if (px < r.left || px > r.right || py < r.top || py > r.bottom) continue;
+        var midX = r.left + r.width / 2, midY = r.top + r.height / 2, band = r.height / 4;
+        var after = py > midY + band || (Math.abs(py - midY) <= band && px > midX);
+        var before = py < midY - band || (Math.abs(py - midY) <= band && px < midX);
+        // переставляем соседей, а не сам элемент: иначе браузер может потерять захват пальца
+        if (k > a && after) list.slice(a + 1, k + 1).forEach(function (s) { box.insertBefore(s, item); });
+        else if (k < a && before) list.slice(k, a).forEach(function (s) { box.insertBefore(s, item.nextSibling); });
+        break;
+      }
+    }
+    // У края экрана страница сама прокручивается
+    function tick() {
+      var edge = 90, speed = 0;
+      if (py < edge) speed = -Math.ceil((edge - py) / 6);
+      else if (py > window.innerHeight - edge) speed = Math.ceil((py - window.innerHeight + edge) / 6);
+      if (speed) { window.scrollBy(0, speed); reorder(); follow(); }
+      raf = requestAnimationFrame(tick);
+    }
+    function onMove(ev) {
+      px = ev.clientX; py = ev.clientY;
+      if (!active) {
+        if (Math.abs(px - e.clientX) + Math.abs(py - e.clientY) < 4) return;
+        active = true;
+        item.classList.add('dragging');
+        document.body.classList.add('is-dragging');
+        raf = requestAnimationFrame(tick);
+      }
+      reorder();
+      follow();
+    }
+    function onUp() {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      cancelAnimationFrame(raf);
+      item.classList.remove('dragging');
+      item.style.transform = '';
+      document.body.classList.remove('is-dragging');
+      if (active) onDrop(siblings().indexOf(item));
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
   }
 
   // Набор фото (и видео): сетка миниатюр
@@ -611,8 +720,7 @@
         var card = h('div', { className: 'media-card' + (m.hidden ? ' is-hidden' : '') }, [
           thumb,
           h('div', { className: 'tools' }, [
-            h('button', { type: 'button', className: 'icon-btn', text: '←', title: 'Раньше', 'aria-label': 'Переместить раньше', disabled: i === 0, onclick: function () { move(arr, i, -1); markDirty(); draw(); } }),
-            h('button', { type: 'button', className: 'icon-btn', text: '→', title: 'Позже', 'aria-label': 'Переместить позже', disabled: i === arr.length - 1, onclick: function () { move(arr, i, 1); markDirty(); draw(); } }),
+            grip(arr, i, '.media-card', (isVideo ? 'видео ' : 'фото ') + (i + 1), function () { draw(); }),
             h('button', { type: 'button', className: 'icon-btn', text: 'Кадр', title: 'Настроить кадр', onclick: function () {
               openCrop(m, opts.shape, isVideo, function (f) { m.frame = f; markDirty(); draw(); });
             } }),
@@ -904,10 +1012,9 @@
     secs.forEach(function (sec, i) {
       var std = isStandard(sec.id);
       list.appendChild(h('div', { className: 'item' + (sec.hidden ? ' is-hidden' : '') }, [h('div', { className: 'item-head' }, [
+        grip(secs, i, '.item', sec.title, function () { drawMenu(); go('blocks', true); }),
         h('div', { className: 'block-name' }, [sec.title || 'Без названия', h('small', { text: S.SECTION_TYPES[sec.type] + (std ? '' : ', свой блок') })]),
         sec.hidden ? h('span', { className: 'badge', text: 'скрыт' }) : null,
-        h('button', { type: 'button', className: 'icon-btn', text: '↑', 'aria-label': 'Выше', disabled: i === 0, onclick: function () { move(secs, i, -1); changed(); } }),
-        h('button', { type: 'button', className: 'icon-btn', text: '↓', 'aria-label': 'Ниже', disabled: i === secs.length - 1, onclick: function () { move(secs, i, 1); changed(); } }),
         h('button', { type: 'button', className: 'icon-btn', text: sec.hidden ? 'Показать' : 'Скрыть', onclick: function () { sec.hidden = !sec.hidden; changed(); } }),
         h('button', { type: 'button', className: 'icon-btn', text: 'Изменить', onclick: function () { go('sec:' + sec.id); } }),
         h('button', { type: 'button', className: 'icon-btn del', text: '✕', 'aria-label': 'Удалить блок', onclick: function () {
@@ -916,7 +1023,7 @@
         } })
       ])]));
     });
-    function changed() { markDirty(); drawMenu(); go('blocks'); }
+    function changed() { markDirty(); drawMenu(); go('blocks', true); }
 
     var custom = { title: '', bg: 'cream', menu: true };
     var addPanel = panel('Новый блок', [
@@ -1105,7 +1212,7 @@
     group('Настройки', [item('seo', 'SEO и подвал'), item('backup', 'Копия и пароль')]);
   }
 
-  function go(key) {
+  function go(key, keepScroll) {
     var v = $('view');
     var secId = key.indexOf('sec:') === 0 ? key.slice(4) : null;
     var sec = secId && state.data.sections.find(function (s) { return s.id === secId; });
@@ -1124,7 +1231,7 @@
     drawMenu();
     $('side').classList.remove('open');
     $('menuBtn').setAttribute('aria-expanded', 'false');
-    window.scrollTo(0, 0);
+    if (!keepScroll) window.scrollTo(0, 0);
   }
 
   /* ---------- данные ---------- */

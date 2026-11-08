@@ -120,6 +120,22 @@ details.more > summary { cursor: pointer; font-weight: 700; color: var(--sky-dee
 .item-title::before { content: "▸ "; color: var(--gold); }
 .item.open .item-title::before { content: "▾ "; }
 .item-body { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
+/* ручка перетаскивания */
+.grip {
+  flex: none; width: 32px; height: 40px; padding: 0; display: grid; place-items: center;
+  border: 1.5px solid var(--line); border-radius: 8px; background: #fff; color: var(--muted);
+  cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none;
+}
+.grip:hover, .grip:focus-visible { color: var(--navy); border-color: var(--navy); }
+.dragging {
+  position: relative; z-index: 30; cursor: grabbing;
+  box-shadow: 0 12px 28px rgba(28, 42, 79, 0.22); outline: 2px solid var(--sky-deep); outline-offset: 0;
+}
+.dragging .grip { cursor: grabbing; color: var(--navy); border-color: var(--navy); }
+body.is-dragging { -webkit-user-select: none; user-select: none; cursor: grabbing; }
+.media-card .tools .grip { width: 30px; height: 30px; }
+.media-card .tools .grip svg { width: 12px; height: 17px; }
+
 .icon-btn { min-width: 34px; height: 34px; border-radius: 8px; border: 1.5px solid var(--line); background: #fff; cursor: pointer; font-weight: 800; padding: 0 8px; font-size: 14px; }
 .icon-btn:hover { border-color: var(--navy); }
 .icon-btn.del:hover { border-color: var(--danger); color: var(--danger); }
@@ -177,5 +193,7 @@ details.more > summary { cursor: pointer; font-weight: 700; color: var(--sky-dee
   .view { padding: 16px; }
   .banner { margin: 12px 16px 0; }
   .item-head { flex-wrap: wrap; }
-  .item-title, .block-name { flex-basis: 100%; }
+  .item-title, .block-name { flex-basis: calc(100% - 44px); }
+  .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .item-body { padding: 4px 10px 12px; }
 }
