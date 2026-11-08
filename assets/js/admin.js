@@ -1,0 +1,1242 @@
+/* Админка: вход, редактирование содержимого, загрузка фото и видео, сохранение. */
+(function () {
+  'use strict';
+
+  var S = window.Site;
+  var CFG = S.config;
+  var MODE = S.mode();
+  var MAX_SIDE = 1800;
+  var MAX_VIDEO_MB = 50;
+
+  var state = { data: null, saved: '', current: 'hero', defaults: null, previews: {} };
+
+  /* ---------- мелкие помощники ---------- */
+
+  function $(id) { return document.getElementById(id); }
+
+  function h(tag, attrs, children) {
+    var el = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v == null || v === false) return;
+      if (k === 'text') el.textContent = v;
+      else if (k === 'className') el.className = v;
+      else if (k.slice(0, 2) === 'on') el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+    (children || []).forEach(function (c) { if (c) el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return el;
+  }
+
+  var toastTimer;
+  function toast(text, isError) {
+    var t = $('toast');
+    t.textContent = text;
+    t.className = 'toast' + (isError ? ' err' : '');
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, isError ? 6000 : 3000);
+  }
+
+  function isDirty() { return state.data && JSON.stringify(state.data) !== state.saved; }
+
+  function markDirty() {
+    var st = $('status');
+    if (isDirty()) { st.textContent = 'Есть несохранённые правки'; st.className = 'status dirty'; }
+    else { st.textContent = 'Всё сохранено'; st.className = 'status'; }
+  }
+
+  // Адрес для превью: только что загруженные в GitHub файлы ещё не опубликованы
+  function previewSrc(src) { return state.previews[src] || S.safeMediaUrl(src); }
+
+  function frameImg(media, isVideo) {
+    var src = previewSrc(media.src);
+    if (!src) return null;
+    var el;
+    if (isVideo && !media.poster) {
+      el = h('video', { muted: true, playsinline: true, preload: 'metadata' });
+      el.src = src + '#t=' + (Number(media.start) || 0.5);
+    } else {
+      el = h('img', { alt: '' });
+      el.src = isVideo ? previewSrc(media.poster) : src;
+    }
+    el.setAttribute('style', S.frameStyle(media.frame));
+    return el;
+  }
+
+  /* ---------- хранилища ---------- */
+
+  function supabaseClient() {
+    if (state.client) return state.client;
+    var key = CFG.supabaseKey;
+    var opts = {};
+    if (/^sb_/.test(key)) {
+      // Ключ sb_publishable_ не JWT: не отправляем его в Authorization
+      opts.global = {
+        fetch: function (input, init) {
+          init = init || {};
+          var headers = new Headers(init.headers || {});
+          if (headers.get('Authorization') === 'Bearer ' + key) headers.delete('Authorization');
+          return fetch(input, Object.assign({}, init, { headers: headers }));
+        }
+      };
+    }
+    state.client = window.supabase.createClient(CFG.supabaseUrl, key, opts);
+    return state.client;
+  }
+
+  var backends = {
+    supabase: {
+      label: 'Supabase',
+      start: function () {
+        var c = supabaseClient();
+        c.auth.onAuthStateChange(function (event) {
+          if (event === 'PASSWORD_RECOVERY') showLogin('recovery');
+        });
+        if (/type=recovery/.test(location.hash)) return Promise.resolve(false);
+        return c.auth.getSession().then(function (r) {
+          if (!r.data.session) return false;
+          return backends.supabase.checkAdmin();
+        });
+      },
+      checkAdmin: function () {
+        return supabaseClient().rpc('is_admin').then(function (r) {
+          if (r.error) throw r.error;
+          return r.data === true;
+        });
+      },
+      signIn: function (email, password) {
+        var c = supabaseClient();
+        return c.auth.signInWithPassword({ email: email, password: password }).then(function (r) {
+          if (r.error) throw new Error('Неверный e-mail или пароль');
+          return backends.supabase.checkAdmin().then(function (ok) {
+            if (!ok) return c.auth.signOut().then(function () { throw new Error('У этой учётной записи нет прав на управление сайтом'); });
+            return true;
+          });
+        });
+      },
+      signOut: function () { return supabaseClient().auth.signOut(); },
+      resetPassword: function (email) {
+        return supabaseClient().auth.resetPasswordForEmail(email, { redirectTo: location.href.split('#')[0] }).then(function (r) {
+          if (r.error) throw r.error;
+        });
+      },
+      changePassword: function (pass) {
+        return supabaseClient().auth.updateUser({ password: pass }).then(function (r) { if (r.error) throw r.error; });
+      },
+      load: function () {
+        return supabaseClient().from('site_content').select('data').eq('id', 1).maybeSingle().then(function (r) {
+          if (r.error) throw r.error;
+          return r.data && S.isValidContent(r.data.data) ? r.data.data : null;
+        });
+      },
+      save: function (data) {
+        return supabaseClient().from('site_content').upsert({ id: 1, data: data, updated_at: new Date().toISOString() }).then(function (r) {
+          if (r.error) throw r.error;
+        });
+      },
+      upload: function (blob, name) {
+        var path = 'uploads/' + name;
+        var bucket = CFG.bucket || 'media';
+        var st = supabaseClient().storage.from(bucket);
+        return st.upload(path, blob, { contentType: blob.type || undefined, upsert: false, cacheControl: '31536000' }).then(function (r) {
+          if (r.error) throw r.error;
+          return st.getPublicUrl(path).data.publicUrl;
+        });
+      }
+    },
+
+    github: {
+      label: 'GitHub',
+      api: function (path, opts) {
+        opts = opts || {};
+        var g = CFG.github;
+        return fetch('https://api.github.com/repos/' + encodeURIComponent(g.owner) + '/' + encodeURIComponent(g.repo) + path, {
+          method: opts.method || 'GET',
+          headers: { Authorization: 'Bearer ' + state.token, Accept: 'application/vnd.github+json' },
+          body: opts.body ? JSON.stringify(opts.body) : undefined,
+          cache: 'no-store'
+        }).then(function (r) {
+          if (r.status === 401) throw new Error('Токен не подходит');
+          if (!r.ok && r.status !== 404) throw new Error('GitHub ответил ошибкой ' + r.status);
+          return r.status === 404 ? null : r.json();
+        });
+      },
+      start: function () {
+        try { state.token = localStorage.getItem('teacherSite.ghToken') || ''; } catch (e) { state.token = ''; }
+        if (!state.token) return Promise.resolve(false);
+        return backends.github.check().catch(function () { return false; });
+      },
+      check: function () {
+        return backends.github.api('').then(function (repo) {
+          if (!repo) throw new Error('Репозиторий не найден');
+          if (!repo.permissions || !repo.permissions.push) throw new Error('У токена нет права записи в репозиторий');
+          return true;
+        });
+      },
+      signIn: function (token, remember) {
+        state.token = token.trim();
+        return backends.github.check().then(function () {
+          try { if (remember) localStorage.setItem('teacherSite.ghToken', state.token); } catch (e) { /* без сохранения */ }
+          return true;
+        });
+      },
+      signOut: function () {
+        try { localStorage.removeItem('teacherSite.ghToken'); } catch (e) { /* ничего */ }
+        state.token = '';
+        return Promise.resolve();
+      },
+      branch: function () { return encodeURIComponent(CFG.github.branch || 'main'); },
+      load: function () {
+        return backends.github.api('/contents/content/default.json?ref=' + backends.github.branch()).then(function (f) {
+          if (!f) return null;
+          state.ghSha = f.sha;
+          var text = decodeURIComponent(escape(atob(f.content.replace(/\n/g, ''))));
+          var data = JSON.parse(text);
+          return S.isValidContent(data) ? data : null;
+        });
+      },
+      save: function (data) {
+        var text = JSON.stringify(data, null, 2) + '\n';
+        return backends.github.api('/contents/content/default.json', {
+          method: 'PUT',
+          body: { message: 'Обновление содержимого сайта', content: btoa(unescape(encodeURIComponent(text))), sha: state.ghSha, branch: CFG.github.branch || 'main' }
+        }).then(function (r) { state.ghSha = r.content.sha; });
+      },
+      upload: function (blob, name) {
+        var path = 'assets/uploads/' + name;
+        return blobToBase64(blob).then(function (b64) {
+          return backends.github.api('/contents/' + path, {
+            method: 'PUT', body: { message: 'Загрузка файла ' + name, content: b64, branch: CFG.github.branch || 'main' }
+          });
+        }).then(function () {
+          state.previews[path] = URL.createObjectURL(blob);
+          return path;
+        });
+      }
+    },
+
+    demo: {
+      label: 'Демо-режим',
+      start: function () { return Promise.resolve(true); },
+      signOut: function () { return Promise.resolve(); },
+      load: function () { return Promise.resolve(S.readDemo()); },
+      save: function (data) {
+        try { S.writeDemo(data); return Promise.resolve(); }
+        catch (e) { return Promise.reject(new Error('В браузере не хватает места. Подключите базу данных (см. README).')); }
+      },
+      upload: function (blob) {
+        if (!/^image\//.test(blob.type)) return Promise.reject(new Error('В демо-режиме можно загружать только фото. Для видео и файлов подключите базу.'));
+        return blobToDataUrl(blob);
+      }
+    }
+  };
+
+  var backend = backends[MODE];
+
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(fr.result); };
+      fr.onerror = function () { reject(new Error('Не удалось прочитать файл')); };
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  function blobToBase64(blob) {
+    return blobToDataUrl(blob).then(function (u) { return u.slice(u.indexOf(',') + 1); });
+  }
+
+  /* ---------- загрузка файлов ---------- */
+
+  function fileName(original, ext) {
+    var base = String(original || 'file').replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'file';
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6) + '-' + base + '.' + ext;
+  }
+
+  function loadImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var im = new Image();
+      im.onload = function () { resolve(im); };
+      im.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Этот файл не похож на фото')); };
+      im.src = url;
+    });
+  }
+
+  // Сжатие до ~1800 пикселей по длинной стороне
+  function compressImage(file, maxSide) {
+    maxSide = maxSide || MAX_SIDE;
+    return loadImage(file).then(function (im) {
+      var k = Math.min(1, maxSide / Math.max(im.naturalWidth, im.naturalHeight));
+      var w = Math.round(im.naturalWidth * k), hh = Math.round(im.naturalHeight * k);
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = hh;
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, hh);
+      ctx.drawImage(im, 0, 0, w, hh);
+      URL.revokeObjectURL(im.src);
+      return new Promise(function (resolve) { canvas.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.85); });
+    });
+  }
+
+  function videoPoster(file) {
+    return new Promise(function (resolve) {
+      var v = document.createElement('video');
+      var url = URL.createObjectURL(file);
+      var done = false;
+      function finish(b) { if (done) return; done = true; URL.revokeObjectURL(url); resolve(b); }
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      v.onloadeddata = function () { v.currentTime = Math.min(1, (v.duration || 2) / 2); };
+      v.onseeked = function () {
+        var k = Math.min(1, 1000 / Math.max(v.videoWidth, v.videoHeight));
+        var c = document.createElement('canvas');
+        c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+        try {
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          c.toBlob(function (b) { finish(b); }, 'image/jpeg', 0.8);
+        } catch (e) { finish(null); }
+      };
+      v.onerror = function () { finish(null); };
+      setTimeout(function () { finish(null); }, 8000);
+      v.src = url;
+    });
+  }
+
+  function uploadPhoto(file) {
+    if (!/^image\/(jpeg|png|webp|gif|heic|heif)$/i.test(file.type) && !/\.(jpe?g|png|webp|heic)$/i.test(file.name)) {
+      return Promise.reject(new Error('Нужен файл фото (JPG, PNG, WebP)'));
+    }
+    return compressImage(file, MODE === 'demo' ? 1200 : MAX_SIDE).then(function (blob) {
+      var name = fileName(file.name, 'jpg');
+      return backend.upload(blob, name).then(function (url) {
+        if (MODE !== 'demo') state.previews[url] = state.previews[url] || URL.createObjectURL(blob);
+        return url;
+      });
+    });
+  }
+
+  function uploadVideo(file) {
+    if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+      return Promise.reject(new Error('Видео больше ' + MAX_VIDEO_MB + ' МБ. Сократите или сожмите его перед загрузкой.'));
+    }
+    if (MODE === 'demo') return Promise.reject(new Error('В демо-режиме видео не сохраняется. Подключите базу (см. README).'));
+    var ext = (/\.([a-z0-9]+)$/i.exec(file.name) || [0, 'mp4'])[1].toLowerCase();
+    return backend.upload(file, fileName(file.name, ext)).then(function (src) {
+      return videoPoster(file).then(function (poster) {
+        if (!poster) return { src: src, poster: '' };
+        return backend.upload(poster, fileName(file.name + '-poster', 'jpg')).then(function (p) { return { src: src, poster: p }; });
+      });
+    });
+  }
+
+  function uploadAnyFile(file) {
+    if (file.size > MAX_VIDEO_MB * 1024 * 1024) return Promise.reject(new Error('Файл больше ' + MAX_VIDEO_MB + ' МБ'));
+    var ext = (/\.([a-z0-9]+)$/i.exec(file.name) || [0, 'bin'])[1].toLowerCase();
+    return backend.upload(file, fileName(file.name, ext));
+  }
+
+  function pickFiles(accept, multiple, cb) {
+    var input = h('input', { type: 'file', accept: accept, className: 'file-input', multiple: multiple || null });
+    input.addEventListener('change', function () {
+      var files = Array.prototype.slice.call(input.files || []);
+      input.remove();
+      if (files.length) cb(files);
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  /* ---------- кадрирование ---------- */
+
+  function openCrop(media, shape, isVideo, onDone) {
+    var modal = $('cropModal'), box = $('cropBox'), zoom = $('cropZoom');
+    var f = S.normFrame(media.frame);
+    var start = S.clone(f);
+    box.className = 'crop-box ' + shape;
+    box.innerHTML = '';
+    var el = frameImg({ src: media.src, poster: isVideo ? '' : media.poster, frame: f, start: media.start }, isVideo);
+    if (!el) return;
+    box.appendChild(el);
+    zoom.value = f.z;
+    function apply() { el.setAttribute('style', S.frameStyle(f)); }
+    var drag = null;
+    box.onpointerdown = function (e) {
+      drag = { x: e.clientX, y: e.clientY, fx: f.x, fy: f.y };
+      box.setPointerCapture(e.pointerId);
+      box.classList.add('dragging');
+    };
+    box.onpointermove = function (e) {
+      if (!drag) return;
+      var r = box.getBoundingClientRect();
+      f.x = Math.round(Math.min(100, Math.max(0, drag.fx - (e.clientX - drag.x) / r.width * 100 / f.z * 1.6)) * 10) / 10;
+      f.y = Math.round(Math.min(100, Math.max(0, drag.fy - (e.clientY - drag.y) / r.height * 100 / f.z * 1.6)) * 10) / 10;
+      apply();
+    };
+    box.onpointerup = box.onpointercancel = function () { drag = null; box.classList.remove('dragging'); };
+    zoom.oninput = function () { f.z = Number(zoom.value); apply(); };
+    $('cropReset').onclick = function () { f = { x: 50, y: 50, z: 1 }; zoom.value = 1; apply(); };
+    function close() { modal.hidden = true; box.innerHTML = ''; document.removeEventListener('keydown', onKey); }
+    function onKey(e) { if (e.key === 'Escape') { close(); } }
+    $('cropCancel').onclick = function () { f = start; close(); };
+    $('cropOk').onclick = function () { close(); onDone(S.normFrame(f)); };
+    document.addEventListener('keydown', onKey);
+    modal.hidden = false;
+    $('cropOk').focus();
+  }
+
+  /* ---------- поля форм ---------- */
+
+  function fieldWrap(label, input, hint) {
+    return h('label', { className: 'field' }, [h('span', { text: label }), input, hint ? h('small', { className: 'hint', text: hint }) : null]);
+  }
+
+  function textField(obj, key, label, opts) {
+    opts = opts || {};
+    var input;
+    if (opts.rows) {
+      input = h('textarea', { rows: opts.rows, placeholder: opts.placeholder || null });
+    } else {
+      input = h('input', { type: opts.type || 'text', placeholder: opts.placeholder || null });
+    }
+    input.value = obj[key] == null ? '' : obj[key];
+    input.addEventListener('input', function () {
+      obj[key] = opts.number ? (input.value === '' ? '' : Number(input.value)) : input.value;
+      markDirty();
+      if (opts.onInput) opts.onInput(input.value);
+    });
+    if (opts.name) input.setAttribute('data-field', opts.name);
+    return fieldWrap(label, input, opts.hint);
+  }
+
+  function selectField(obj, key, label, options, opts) {
+    opts = opts || {};
+    var sel = h('select');
+    options.forEach(function (o) {
+      var op = h('option', { value: o[0], text: o[1] });
+      if (String(obj[key] || '') === String(o[0])) op.selected = true;
+      sel.appendChild(op);
+    });
+    sel.addEventListener('change', function () { obj[key] = sel.value; markDirty(); if (opts.onChange) opts.onChange(); });
+    return fieldWrap(label, sel, opts.hint);
+  }
+
+  function checkField(obj, key, label, invert, onChange) {
+    var cb = h('input', { type: 'checkbox' });
+    cb.checked = invert ? !obj[key] : !!obj[key];
+    cb.addEventListener('change', function () { obj[key] = invert ? !cb.checked : cb.checked; markDirty(); if (onChange) onChange(); });
+    return h('label', { className: 'check' }, [cb, label]);
+  }
+
+  function more(children) {
+    var d = h('details', { className: 'more' }, [h('summary', { text: 'Дополнительно' })]);
+    children.forEach(function (c) { if (c) d.appendChild(c); });
+    return d;
+  }
+
+  var BG_OPTIONS = [['cream', 'Кремовый'], ['sky', 'Небесно-голубой'], ['powder', 'Пудрово-розовый'], ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий']];
+
+  // Одна картинка: { src, frame }
+  function imageField(owner, key, label, shape) {
+    var wrap = h('div', { className: 'field' }, [h('span', { text: label })]);
+    var row = h('div', { className: 'img-field' });
+    wrap.appendChild(row);
+    function draw() {
+      row.innerHTML = '';
+      var media = owner[key];
+      var thumb = h('div', { className: 'thumb ' + shape });
+      var el = media && media.src ? frameImg(media) : null;
+      thumb.appendChild(el || h('span', { className: 'empty', text: 'Нет фото' }));
+      var busy = h('span', { className: 'progress' });
+      var actions = h('div', { className: 'img-actions' }, [
+        h('button', { type: 'button', className: 'btn small', text: media && media.src ? 'Заменить фото' : 'Загрузить фото', onclick: function () {
+          pickFiles('image/*', false, function (files) {
+            busy.textContent = 'Загрузка…';
+            uploadPhoto(files[0]).then(function (url) {
+              owner[key] = { src: url, frame: { x: 50, y: 50, z: 1 } };
+              markDirty(); draw();
+              toast('Фото загружено. Не забудьте сохранить.');
+            }).catch(function (e) { busy.textContent = ''; toast(e.message || 'Не удалось загрузить фото', true); });
+          });
+        } }),
+        media && media.src ? h('button', { type: 'button', className: 'btn small', text: 'Настроить кадр', onclick: function () {
+          openCrop(media, shape, false, function (f) { media.frame = f; markDirty(); draw(); });
+        } }) : null,
+        media && media.src ? h('button', { type: 'button', className: 'btn small danger', text: 'Убрать', onclick: function () {
+          owner[key] = { src: '', frame: { x: 50, y: 50, z: 1 } }; markDirty(); draw();
+        } }) : null,
+        busy
+      ]);
+      row.appendChild(thumb);
+      row.appendChild(actions);
+    }
+    draw();
+    return wrap;
+  }
+
+  // Ссылка или загруженный файл
+  function linkField(obj, key, label, hint) {
+    var input = h('input', { type: 'text', placeholder: 'https://… или загрузите файл' });
+    input.value = obj[key] || '';
+    input.addEventListener('input', function () { obj[key] = input.value; markDirty(); });
+    var busy = h('span', { className: 'progress' });
+    var btn = h('button', { type: 'button', className: 'btn small', text: 'Загрузить файл', onclick: function () {
+      pickFiles('', false, function (files) {
+        busy.textContent = 'Загрузка…';
+        uploadAnyFile(files[0]).then(function (url) {
+          obj[key] = url; input.value = url; busy.textContent = 'Готово'; markDirty();
+        }).catch(function (e) { busy.textContent = ''; toast(e.message, true); });
+      });
+    } });
+    return h('div', { className: 'field' }, [h('span', { text: label }), h('div', { className: 'inline' }, [input, btn, busy]),
+      h('small', { className: 'hint', text: hint || 'Ссылка на страницу (https://…), почта (mailto:) или загруженный файл PDF, Word и т. п.' })]);
+  }
+
+  // Список карточек: добавить, раскрыть, ↑↓, скрыть, удалить
+  function listField(arr, opts) {
+    var wrap = h('div');
+    var listEl = h('div', { className: 'list' });
+    wrap.appendChild(listEl);
+    var openIds = {};
+    function draw() {
+      listEl.innerHTML = '';
+      if (!arr.length) listEl.appendChild(h('p', { className: 'muted', text: opts.emptyText || 'Пока пусто.' }));
+      arr.forEach(function (item, i) {
+        if (!item.id) item.id = S.uid(opts.prefix || 'item');
+        var isOpen = !!openIds[item.id];
+        var card = h('div', { className: 'item' + (isOpen ? ' open' : '') + (item.hidden ? ' is-hidden' : '') });
+        var titleBtn = h('button', { type: 'button', className: 'item-title', text: opts.title(item) || 'Без названия', 'aria-expanded': String(isOpen),
+          onclick: function () { openIds[item.id] = !isOpen; draw(); } });
+        var head = h('div', { className: 'item-head' }, [
+          titleBtn,
+          item.hidden ? h('span', { className: 'badge', text: 'скрыто' }) : null,
+          h('button', { type: 'button', className: 'icon-btn', title: 'Выше', 'aria-label': 'Переместить выше', text: '↑', disabled: i === 0,
+            onclick: function () { move(arr, i, -1); markDirty(); draw(); } }),
+          h('button', { type: 'button', className: 'icon-btn', title: 'Ниже', 'aria-label': 'Переместить ниже', text: '↓', disabled: i === arr.length - 1,
+            onclick: function () { move(arr, i, 1); markDirty(); draw(); } }),
+          opts.noHide ? null : h('button', { type: 'button', className: 'icon-btn', text: item.hidden ? 'Показать' : 'Скрыть',
+            title: item.hidden ? 'Показать на сайте' : 'Скрыть на сайте', onclick: function () { item.hidden = !item.hidden; markDirty(); draw(); } }),
+          h('button', { type: 'button', className: 'icon-btn del', title: 'Удалить', 'aria-label': 'Удалить', text: '✕', onclick: function () {
+            if (!confirm('Удалить «' + (opts.title(item) || 'элемент') + '»?')) return;
+            arr.splice(i, 1); markDirty(); draw();
+          } })
+        ]);
+        card.appendChild(head);
+        if (isOpen) {
+          var body = h('div', { className: 'item-body' });
+          opts.fields(item, body, function () { titleBtn.textContent = opts.title(item) || 'Без названия'; });
+          card.appendChild(body);
+        }
+        listEl.appendChild(card);
+      });
+    }
+    draw();
+    wrap.appendChild(h('button', { type: 'button', className: 'btn small', text: '+ ' + (opts.addLabel || 'Добавить'), onclick: function () {
+      var item = opts.make();
+      item.id = item.id || S.uid(opts.prefix || 'item');
+      arr.push(item);
+      openIds[item.id] = true;
+      markDirty(); draw();
+    } }));
+    return wrap;
+  }
+
+  function move(arr, i, d) {
+    var j = i + d;
+    if (j < 0 || j >= arr.length) return;
+    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+
+  // Набор фото (и видео): сетка миниатюр
+  function mediaField(arr, opts) {
+    var wrap = h('div', { className: 'field' }, [h('span', { text: opts.label })]);
+    var grid = h('div', { className: 'media-grid' });
+    var busy = h('span', { className: 'progress' });
+    wrap.appendChild(grid);
+    function draw() {
+      grid.innerHTML = '';
+      if (!arr.length) grid.appendChild(h('p', { className: 'muted', text: 'Пока ничего не загружено.' }));
+      arr.forEach(function (m, i) {
+        if (!m.id) m.id = S.uid('m');
+        var isVideo = m.type === 'video';
+        var thumb = h('div', { className: 'thumb ' + opts.shape });
+        thumb.appendChild(frameImg(m, isVideo) || h('span', { className: 'empty', text: 'Нет файла' }));
+        if (isVideo) thumb.appendChild(h('span', { className: 'kind', text: 'видео' }));
+        var card = h('div', { className: 'media-card' + (m.hidden ? ' is-hidden' : '') }, [
+          thumb,
+          h('div', { className: 'tools' }, [
+            h('button', { type: 'button', className: 'icon-btn', text: '←', title: 'Раньше', 'aria-label': 'Переместить раньше', disabled: i === 0, onclick: function () { move(arr, i, -1); markDirty(); draw(); } }),
+            h('button', { type: 'button', className: 'icon-btn', text: '→', title: 'Позже', 'aria-label': 'Переместить позже', disabled: i === arr.length - 1, onclick: function () { move(arr, i, 1); markDirty(); draw(); } }),
+            h('button', { type: 'button', className: 'icon-btn', text: 'Кадр', title: 'Настроить кадр', onclick: function () {
+              openCrop(m, opts.shape, isVideo, function (f) { m.frame = f; markDirty(); draw(); });
+            } }),
+            h('button', { type: 'button', className: 'icon-btn', text: m.hidden ? 'Показать' : 'Скрыть', onclick: function () { m.hidden = !m.hidden; markDirty(); draw(); } }),
+            h('button', { type: 'button', className: 'icon-btn del', text: '✕', title: 'Удалить', 'aria-label': 'Удалить', onclick: function () {
+              if (!confirm('Удалить этот файл со страницы?')) return;
+              arr.splice(i, 1); markDirty(); draw();
+            } })
+          ])
+        ]);
+        if (opts.captions) {
+          var cap = h('textarea', { rows: 2, placeholder: 'Подпись (необязательно)' });
+          cap.value = m.caption || '';
+          cap.addEventListener('input', function () { m.caption = cap.value; markDirty(); });
+          card.appendChild(cap);
+        }
+        if (isVideo) {
+          var tr = h('details', {}, [h('summary', { text: 'Обрезать по времени' })]);
+          var st = h('input', { type: 'number', min: '0', step: '0.5', placeholder: 'Начало, сек' });
+          var en = h('input', { type: 'number', min: '0', step: '0.5', placeholder: 'Конец, сек' });
+          st.value = m.start || ''; en.value = m.end || '';
+          st.addEventListener('input', function () { m.start = st.value === '' ? '' : Number(st.value); markDirty(); });
+          en.addEventListener('input', function () { m.end = en.value === '' ? '' : Number(en.value); markDirty(); });
+          tr.appendChild(st); tr.appendChild(en);
+          card.appendChild(tr);
+        }
+        grid.appendChild(card);
+      });
+    }
+    draw();
+    var accept = opts.allowVideo ? 'image/*,video/mp4,video/quicktime,video/webm' : 'image/*';
+    wrap.appendChild(h('div', { className: 'inline' }, [
+      h('button', { type: 'button', className: 'btn small', text: opts.allowVideo ? '+ Добавить фото или видео' : '+ Добавить скан или фото', onclick: function () {
+        pickFiles(accept, true, function (files) {
+          var done = 0;
+          busy.textContent = 'Загрузка 0 из ' + files.length + '…';
+          files.reduce(function (p, file) {
+            return p.then(function () {
+              var isVideo = /^video\//.test(file.type) || /\.(mp4|mov|webm|m4v)$/i.test(file.name);
+              if (isVideo && !opts.allowVideo) throw new Error('Здесь можно загрузить только фото');
+              var job = isVideo ? uploadVideo(file).then(function (r) {
+                arr.push({ id: S.uid('m'), type: 'video', src: r.src, poster: r.poster, frame: { x: 50, y: 50, z: 1 }, caption: '' });
+              }) : uploadPhoto(file).then(function (url) {
+                arr.push({ id: S.uid('m'), type: 'photo', src: url, frame: { x: 50, y: 50, z: 1 }, caption: '' });
+              });
+              return job.then(function () {
+                done++; busy.textContent = 'Загрузка ' + done + ' из ' + files.length + '…'; markDirty(); draw();
+              });
+            });
+          }, Promise.resolve()).then(function () {
+            busy.textContent = ''; toast('Загружено: ' + done + '. Не забудьте сохранить.');
+          }).catch(function (e) { busy.textContent = ''; toast(e.message || 'Ошибка загрузки', true); });
+        });
+      } }),
+      busy
+    ]));
+    return wrap;
+  }
+
+  /* ---------- экраны ---------- */
+
+  function panel(title, children) {
+    var p = h('section', { className: 'panel' }, title ? [h('h2', { text: title })] : []);
+    children.forEach(function (c) { if (c) p.appendChild(c); });
+    return p;
+  }
+
+  function sectionCommon(sec, refreshMenu) {
+    return [
+      textField(sec, 'title', 'Заголовок блока', { onInput: refreshMenu, name: 'section-title' }),
+      checkField(sec, 'hidden', 'Показывать блок на сайте', true, refreshMenu),
+      more([
+        textField(sec, 'menuLabel', 'Название в меню', { hint: 'Если пусто, берётся заголовок', onInput: refreshMenu }),
+        menuCheck(sec),
+        selectField(sec, 'bg', 'Фон блока', BG_OPTIONS)
+      ])
+    ];
+  }
+
+  // Пункт в меню показан, пока не задано menu: false
+  function menuCheck(sec) {
+    var cb = h('input', { type: 'checkbox' });
+    cb.checked = sec.menu !== false;
+    cb.addEventListener('change', function () {
+      if (cb.checked) delete sec.menu; else sec.menu = false;
+      markDirty();
+    });
+    return h('label', { className: 'check' }, [cb, 'Показывать пункт в меню']);
+  }
+
+  var editors = {
+    about: function (sec, v) {
+      v.appendChild(panel('Текст', [
+        textField(sec, 'text', 'О себе', { rows: 12, hint: 'Пустая строка между абзацами начинает новый абзац.' }),
+        textField(sec, 'goal', 'Выделенная фраза', { rows: 2 })
+      ]));
+      v.appendChild(panel('Фото', [imageField(sec, 'photo', 'Фото в круге', 'circle'), more([textField(sec, 'photoAlt', 'Описание фото для незрячих')])]));
+    },
+    education: function (sec, v) {
+      v.appendChild(panel('Учебные заведения', [listField(sec.items, {
+        prefix: 'edu', addLabel: 'Добавить учебное заведение',
+        title: function (it) { return it.title; },
+        make: function () { return { title: '', place: '', period: '', text: '' }; },
+        fields: function (it, b, upd) {
+          b.appendChild(textField(it, 'title', 'Учебное заведение', { onInput: upd }));
+          b.appendChild(textField(it, 'place', 'Город'));
+          b.appendChild(textField(it, 'period', 'Годы обучения', { placeholder: 'например: с 2024 по 2027' }));
+          b.appendChild(textField(it, 'text', 'Специальность, квалификация', { rows: 3, hint: 'Каждая строка выводится отдельно.' }));
+        }
+      })]));
+      v.appendChild(panel(null, [more([textField(sec, 'text', 'Вступительный текст', { rows: 3 })])]));
+    },
+    experience: function (sec, v) {
+      v.appendChild(panel('Места работы и практики', [listField(sec.items, {
+        prefix: 'exp', addLabel: 'Добавить место работы',
+        title: function (it) { return [it.role, it.org].filter(Boolean).join(', '); },
+        make: function () { return { role: '', period: '', org: '', points: '' }; },
+        fields: function (it, b, upd) {
+          b.appendChild(textField(it, 'role', 'Должность', { onInput: upd }));
+          b.appendChild(textField(it, 'org', 'Где', { onInput: upd }));
+          b.appendChild(textField(it, 'period', 'Когда', { placeholder: 'например: с 28.05 по 19.06.2026' }));
+          b.appendChild(textField(it, 'points', 'Что делала', { rows: 6, hint: 'Каждый пункт с новой строки.' }));
+        }
+      })]));
+    },
+    courses: function (sec, v) {
+      v.appendChild(panel('Текст', [textField(sec, 'text', 'Вступительный текст', { rows: 4 })]));
+      v.appendChild(panel('Курсы', [listField(sec.items, {
+        prefix: 'course', addLabel: 'Добавить курс', emptyText: 'Курсов пока нет. На сайте будет показан только текст.',
+        title: function (it) { return it.title; },
+        make: function () { return { title: '', org: '', year: '', hours: '', text: '', link: '' }; },
+        fields: function (it, b, upd) {
+          b.appendChild(textField(it, 'title', 'Название курса', { onInput: upd }));
+          b.appendChild(textField(it, 'org', 'Организация'));
+          b.appendChild(textField(it, 'year', 'Год'));
+          b.appendChild(textField(it, 'hours', 'Часов'));
+          b.appendChild(textField(it, 'text', 'Описание', { rows: 3 }));
+          b.appendChild(linkField(it, 'link', 'Удостоверение или сертификат'));
+        }
+      })]));
+    },
+    achievements: function (sec, v) {
+      v.appendChild(panel('Категории', [textField(sec, 'categories', 'Категории для фильтра', { rows: 3, hint: 'Каждая категория с новой строки.' }),
+        more([textField(sec, 'text', 'Вступительный текст', { rows: 3 })])]));
+      v.appendChild(panel('Достижения и грамоты', [listField(sec.items, {
+        prefix: 'ach', addLabel: 'Добавить достижение',
+        title: function (it) { return it.title; },
+        make: function () { return { category: S.lines(sec.categories)[0] || '', title: '', org: '', text: '', scans: [] }; },
+        fields: function (it, b, upd) {
+          var cats = S.lines(sec.categories);
+          if (it.category && cats.indexOf(it.category) < 0) cats.push(it.category);
+          b.appendChild(selectField(it, 'category', 'Категория', [['', 'Без категории']].concat(cats.map(function (c) { return [c, c]; }))));
+          b.appendChild(textField(it, 'title', 'Название', { onInput: upd }));
+          b.appendChild(textField(it, 'org', 'Кто наградил, где'));
+          b.appendChild(textField(it, 'text', 'Описание', { rows: 3 }));
+          if (!Array.isArray(it.scans)) it.scans = [];
+          b.appendChild(mediaField(it.scans, { label: 'Сканы дипломов и грамот', shape: 'wide', allowVideo: false, captions: false }));
+          b.appendChild(h('p', { className: 'muted', text: 'Не публикуйте документы с персональными данными других людей (например, списки награждённых).' }));
+        }
+      })]));
+    },
+    gallery: function (sec, v) {
+      v.appendChild(panel('Альбомы', [listField(sec.albums, {
+        prefix: 'album', addLabel: 'Добавить альбом',
+        title: function (a) { var n = (a.items || []).length; return a.title + (n ? ' (' + n + ')' : ''); },
+        make: function () { return { title: 'Новый альбом', text: '', items: [] }; },
+        fields: function (a, b, upd) {
+          if (!Array.isArray(a.items)) a.items = [];
+          b.appendChild(textField(a, 'title', 'Название альбома', { onInput: upd }));
+          b.appendChild(textField(a, 'text', 'Описание альбома', { rows: 3 }));
+          b.appendChild(mediaField(a.items, { label: 'Фото и видео', shape: 'tile', allowVideo: true, captions: true }));
+        }
+      })]));
+      v.appendChild(panel(null, [
+        textField(sec, 'note', 'Примечание под альбомами', { rows: 2 }),
+        more([textField(sec, 'text', 'Вступительный текст', { rows: 3 }), textField(sec, 'emptyText', 'Текст для пустого альбома', { placeholder: 'Скоро здесь появятся фотографии.' })])
+      ]));
+      v.appendChild(h('p', { className: 'muted', text: 'Фотографии детей публикуйте только с письменного согласия родителей. Видео до ' + MAX_VIDEO_MB + ' МБ.' }));
+    },
+    materials: function (sec, v) {
+      v.appendChild(panel('Текст', [textField(sec, 'text', 'Вступление', { rows: 4 })]));
+      v.appendChild(panel('Материалы', [listField(sec.items, {
+        prefix: 'mat', addLabel: 'Добавить материал',
+        title: function (it) { return it.title; },
+        make: function () { return { title: '', text: '', link: '' }; },
+        fields: function (it, b, upd) {
+          b.appendChild(textField(it, 'title', 'Название', { onInput: upd }));
+          b.appendChild(textField(it, 'text', 'Пояснение', { rows: 2 }));
+          b.appendChild(linkField(it, 'link', 'Ссылка или файл'));
+        }
+      })]));
+      v.appendChild(panel('В конце', [textField(sec, 'remember', 'Памятка в рамке', { rows: 3 })]));
+    },
+    contacts: function (sec, v) {
+      v.appendChild(panel('Контакты', [
+        textField(sec, 'text', 'Текст', { rows: 2 }),
+        textField(sec, 'phone', 'Телефон'),
+        textField(sec, 'email', 'E-mail', { type: 'email' }),
+        textField(sec, 'telegram', 'Telegram', { placeholder: '@имя или ссылка' }),
+        textField(sec, 'vk', 'ВКонтакте', { placeholder: 'адрес страницы' }),
+        textField(sec, 'place', 'Где работаю'),
+        h('p', { className: 'muted', text: 'Пустые поля на сайте не показываются.' })
+      ]));
+    },
+    custom: function (sec, v) {
+      if (!sec.button) sec.button = { label: '', href: '' };
+      v.appendChild(panel('Содержимое', [
+        textField(sec, 'text', 'Текст', { rows: 6, hint: 'Пустая строка между абзацами начинает новый абзац.' }),
+        textField(sec, 'points', 'Пункты списка', { rows: 4, hint: 'Каждый пункт с новой строки.' }),
+        imageField(sec, 'photo', 'Фото', 'wide')
+      ]));
+      v.appendChild(panel('Кнопка', [textField(sec.button, 'label', 'Надпись на кнопке'), linkField(sec.button, 'href', 'Куда ведёт')]));
+    }
+  };
+
+  var views = {
+    hero: {
+      title: 'Шапка',
+      draw: function (v) {
+        var hr = state.data.hero;
+        if (!Array.isArray(hr.buttons)) hr.buttons = [];
+        if (!Array.isArray(hr.cards)) hr.cards = [];
+        v.appendChild(panel('Главное', [
+          textField(hr, 'kicker', 'Строка над именем'),
+          textField(hr, 'name', 'ФИО', { name: 'hero-name' }),
+          textField(hr, 'role', 'Должность'),
+          textField(hr, 'epigraph', 'Эпиграф', { rows: 3, hint: 'Кавычки «» добавятся сами.' }),
+          textField(hr, 'epigraphAuthor', 'Автор эпиграфа'),
+          textField(hr, 'text', 'Короткий текст', { rows: 3 })
+        ]));
+        v.appendChild(panel('Фото', [imageField(hr, 'photo', 'Фото в круге', 'circle'), more([textField(hr, 'photoAlt', 'Описание фото для незрячих')])]));
+        v.appendChild(panel('Кнопки', [listField(hr.buttons, {
+          prefix: 'btn', addLabel: 'Добавить кнопку',
+          title: function (b) { return b.label; },
+          make: function () { return { label: 'Новая кнопка', href: '#contacts' }; },
+          fields: function (b, body, upd) {
+            body.appendChild(textField(b, 'label', 'Надпись', { onInput: upd }));
+            body.appendChild(selectField(b, 'href', 'Куда ведёт', anchorOptions(b.href)));
+            body.appendChild(more([textField(b, 'href', 'Или своя ссылка', { placeholder: 'https://…' })]));
+          }
+        })]));
+        v.appendChild(panel('Карточки под шапкой', [listField(hr.cards, {
+          prefix: 'card', addLabel: 'Добавить карточку',
+          title: function (c) { return c.title; },
+          make: function () { return { title: '', text: '' }; },
+          fields: function (c, body, upd) {
+            body.appendChild(textField(c, 'title', 'Крупно', { onInput: upd }));
+            body.appendChild(textField(c, 'text', 'Пояснение', { rows: 2 }));
+          }
+        }), h('p', { className: 'muted', text: 'Лучше всего смотрятся три карточки.' })]));
+      }
+    },
+    blocks: { title: 'Блоки страницы', draw: drawBlocks },
+    seo: {
+      title: 'SEO и подвал',
+      draw: function (v) {
+        var seo = state.data.seo = state.data.seo || {};
+        if (typeof seo.ogImage === 'string') seo.ogImage = { src: seo.ogImage, frame: { x: 50, y: 50, z: 1 } };
+        v.appendChild(panel('Для поисковиков и мессенджеров', [
+          textField(seo, 'title', 'Заголовок вкладки'),
+          textField(seo, 'description', 'Описание сайта', { rows: 3, hint: 'Показывается в поиске, 1 или 2 предложения.' }),
+          imageField(seo, 'ogImage', 'Картинка для ссылки в мессенджерах', 'wide')
+        ]));
+        v.appendChild(panel('Подвал', [textField(state.data, 'footer', 'Текст в подвале', { hint: 'Если пусто, берётся строка над именем.' })]));
+      }
+    },
+    backup: { title: 'Копия и пароль', draw: drawBackup }
+  };
+
+  function anchorOptions(current) {
+    var opts = state.data.sections.map(function (s) { return ['#' + s.id, 'Блок «' + s.title + '»']; });
+    if (current && !opts.some(function (o) { return o[0] === current; })) opts.unshift([current, current]);
+    return opts;
+  }
+
+  function drawBlocks(v) {
+    var secs = state.data.sections;
+    var list = h('div', { className: 'list blocks' });
+    secs.forEach(function (sec, i) {
+      var std = isStandard(sec.id);
+      list.appendChild(h('div', { className: 'item' + (sec.hidden ? ' is-hidden' : '') }, [h('div', { className: 'item-head' }, [
+        h('div', { className: 'block-name' }, [sec.title || 'Без названия', h('small', { text: S.SECTION_TYPES[sec.type] + (std ? '' : ', свой блок') })]),
+        sec.hidden ? h('span', { className: 'badge', text: 'скрыт' }) : null,
+        h('button', { type: 'button', className: 'icon-btn', text: '↑', 'aria-label': 'Выше', disabled: i === 0, onclick: function () { move(secs, i, -1); changed(); } }),
+        h('button', { type: 'button', className: 'icon-btn', text: '↓', 'aria-label': 'Ниже', disabled: i === secs.length - 1, onclick: function () { move(secs, i, 1); changed(); } }),
+        h('button', { type: 'button', className: 'icon-btn', text: sec.hidden ? 'Показать' : 'Скрыть', onclick: function () { sec.hidden = !sec.hidden; changed(); } }),
+        h('button', { type: 'button', className: 'icon-btn', text: 'Изменить', onclick: function () { go('sec:' + sec.id); } }),
+        h('button', { type: 'button', className: 'icon-btn del', text: '✕', 'aria-label': 'Удалить блок', onclick: function () {
+          if (!confirm('Удалить блок «' + sec.title + '»?' + (std ? ' Стандартный блок потом можно вернуть.' : ''))) return;
+          secs.splice(i, 1); changed();
+        } })
+      ])]));
+    });
+    function changed() { markDirty(); drawMenu(); go('blocks'); }
+
+    var custom = { title: '', bg: 'cream', menu: true };
+    var addPanel = panel('Новый блок', [
+      textField(custom, 'title', 'Заголовок', { name: 'new-block-title' }),
+      selectField(custom, 'bg', 'Фон', BG_OPTIONS),
+      checkField(custom, 'menu', 'Добавить пункт в меню'),
+      h('button', { type: 'button', className: 'btn primary', text: 'Создать блок', onclick: function () {
+        if (!custom.title.trim()) { toast('Введите заголовок блока', true); return; }
+        var sec = { id: S.uid('block'), type: 'custom', title: custom.title.trim(), menuLabel: '', bg: custom.bg, text: '', points: '',
+          photo: { src: '', frame: { x: 50, y: 50, z: 1 } }, button: { label: '', href: '' } };
+        if (!custom.menu) sec.menu = false;
+        var ci = secs.findIndex(function (s) { return s.type === 'contacts'; });
+        secs.splice(ci < 0 ? secs.length : ci, 0, sec);
+        markDirty(); drawMenu(); go('sec:' + sec.id);
+      } })
+    ]);
+
+    var missing = (state.defaults && state.defaults.sections || []).filter(function (d) {
+      return !secs.some(function (s) { return s.id === d.id; });
+    });
+    var restore = missing.length ? panel('Вернуть стандартный блок', missing.map(function (d) {
+      return h('div', { className: 'inline', style: 'margin-bottom:8px' }, [h('span', { text: d.title, style: 'flex:1;font-weight:700' }),
+        h('button', { type: 'button', className: 'btn small', text: 'Вернуть', onclick: function () {
+          var di = state.defaults.sections.indexOf(d);
+          var after = state.defaults.sections.slice(0, di).reverse().map(function (x) { return x.id; });
+          var pos = secs.length;
+          for (var k = 0; k < after.length; k++) {
+            var idx = secs.findIndex(function (s) { return s.id === after[k]; });
+            if (idx >= 0) { pos = idx + 1; break; }
+          }
+          if (pos === secs.length && di === 0) pos = 0;
+          secs.splice(pos, 0, S.clone(d));
+          changed();
+        } })]);
+    })) : null;
+
+    v.appendChild(panel('Порядок блоков', [h('p', { className: 'muted', text: 'Шапка всегда наверху. Блоки ниже можно переставлять, скрывать и удалять.' }), list]));
+    v.appendChild(addPanel);
+    if (restore) v.appendChild(restore);
+  }
+
+  function drawBackup(v) {
+    v.appendChild(panel('Резервная копия', [
+      h('p', { className: 'muted', text: 'Скачайте файл content.json: в нём всё содержимое сайта. Его можно загрузить обратно или положить в проект как content/default.json.' }),
+      h('div', { className: 'inline' }, [
+        h('button', { type: 'button', className: 'btn', text: 'Скачать content.json', onclick: exportJson }),
+        h('button', { type: 'button', className: 'btn', text: 'Загрузить из файла', onclick: importJson })
+      ])
+    ]));
+    v.appendChild(panel('Обновления проекта', [
+      h('p', { className: 'muted', text: 'Если в проект добавили новые материалы, их можно перенести на сайт. Ваши правки сохранятся.' }),
+      h('button', { type: 'button', className: 'btn', text: 'Проверить новые материалы', onclick: function () { checkMerge(true); } })
+    ]));
+    if (MODE === 'supabase') {
+      var pass = { a: '', b: '' };
+      v.appendChild(panel('Смена пароля', [
+        textField(pass, 'a', 'Новый пароль', { type: 'password', hint: 'Не короче 8 символов.' }),
+        textField(pass, 'b', 'Повторите пароль', { type: 'password' }),
+        h('button', { type: 'button', className: 'btn primary', text: 'Сменить пароль', onclick: function () {
+          if (pass.a.length < 8) { toast('Пароль должен быть не короче 8 символов', true); return; }
+          if (pass.a !== pass.b) { toast('Пароли не совпадают', true); return; }
+          backend.changePassword(pass.a).then(function () { toast('Пароль изменён'); go('backup'); })
+            .catch(function (e) { toast('Не удалось сменить пароль: ' + (e.message || ''), true); });
+        } })
+      ]));
+    }
+    v.appendChild(panel('Где хранится содержимое', [h('p', { text: {
+      supabase: 'База данных Supabase. Если база недоступна, сайт покажет копию из content/default.json.',
+      github: 'Файл content/default.json в репозитории GitHub. После сохранения сайт обновится примерно через минуту.',
+      demo: 'Демо-режим: правки хранятся только в этом браузере. Чтобы правки видели все, подключите базу (README.md).'
+    }[MODE] })]));
+  }
+
+  function exportJson() {
+    var blob = new Blob([JSON.stringify(state.data, null, 2)], { type: 'application/json' });
+    var a = h('a', { href: URL.createObjectURL(blob), download: 'content.json' });
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function importJson() {
+    pickFiles('application/json,.json', false, function (files) {
+      var fr = new FileReader();
+      fr.onload = function () {
+        try {
+          var data = JSON.parse(fr.result);
+          if (!S.isValidContent(data)) throw new Error();
+          if (!confirm('Заменить всё содержимое сайта данными из файла? Изменения вступят в силу после сохранения.')) return;
+          state.data = data; normalize(state.data); markDirty(); drawMenu(); go('hero');
+          toast('Файл загружен. Нажмите «Сохранить».');
+        } catch (e) { toast('Это не файл содержимого сайта', true); }
+      };
+      fr.readAsText(files[0]);
+    });
+  }
+
+  /* ---------- новые материалы из default.json ---------- */
+
+  function collectIds(node, out) {
+    if (Array.isArray(node)) node.forEach(function (x) { collectIds(x, out); });
+    else if (node && typeof node === 'object') {
+      if (typeof node.id === 'string') out.push(node.id);
+      Object.keys(node).forEach(function (k) { if (node[k] && typeof node[k] === 'object') collectIds(node[k], out); });
+    }
+    return out;
+  }
+
+  function findNew(def, cur, known, out, label) {
+    Object.keys(def).forEach(function (key) {
+      var dv = def[key];
+      if (Array.isArray(dv) && dv.length && dv[0] && typeof dv[0] === 'object' && 'id' in dv[0]) {
+        if (!Array.isArray(cur[key])) return;
+        var ca = cur[key];
+        dv.forEach(function (d, di) {
+          var match = ca.find(function (c) { return c && c.id === d.id; });
+          if (match) { findNew(d, match, known, out, d.title || d.role || label); return; }
+          if (known[d.id]) return;
+          out.push({ arr: ca, item: d, defArr: dv, index: di, where: label, name: d.title || d.role || d.label || (d.type === 'video' ? 'видео' : 'фото') });
+        });
+      } else if (dv && typeof dv === 'object' && !Array.isArray(dv) && cur[key] && typeof cur[key] === 'object') {
+        findNew(dv, cur[key], known, out, label);
+      }
+    });
+    return out;
+  }
+
+  function checkMerge(manual) {
+    var box = $('banners');
+    box.innerHTML = '';
+    if (!state.defaults || MODE === 'github') { if (manual) toast('Новых материалов нет'); return; }
+    var known = {};
+    (state.data.knownDefaults || []).forEach(function (id) { known[id] = true; });
+    var found = findNew(state.defaults, state.data, known, [], '');
+    if (!found.length) { if (manual) toast('Новых материалов нет'); return; }
+    var names = {};
+    found.forEach(function (f) { var n = f.where ? f.where + ': ' + f.name : f.name; names[n] = (names[n] || 0) + 1; });
+    var ul = h('ul');
+    Object.keys(names).slice(0, 8).forEach(function (n) { ul.appendChild(h('li', { text: n + (names[n] > 1 ? ' × ' + names[n] : '') })); });
+    function remember() {
+      state.data.knownDefaults = uniq((state.data.knownDefaults || []).concat(collectIds(found.map(function (f) { return f.item; }), [])));
+    }
+    box.appendChild(h('div', { className: 'banner' }, [
+      h('p', { text: 'В проекте появились новые материалы (' + found.length + '). Их можно добавить на сайт, ваши правки не изменятся:' }), ul,
+      h('div', { className: 'row' }, [
+        h('button', { type: 'button', className: 'btn primary small', text: 'Добавить', onclick: function () {
+          found.forEach(function (f) {
+            var prev = f.defArr.slice(0, f.index).reverse();
+            var pos = f.arr.length;
+            for (var k = 0; k < prev.length; k++) {
+              var idx = f.arr.findIndex(function (c) { return c && c.id === prev[k].id; });
+              if (idx >= 0) { pos = idx + 1; break; }
+            }
+            if (f.index === 0) pos = 0;
+            f.arr.splice(pos, 0, S.clone(f.item));
+          });
+          remember(); markDirty(); drawMenu(); go(state.current); box.innerHTML = '';
+          toast('Добавлено. Нажмите «Сохранить».');
+        } }),
+        h('button', { type: 'button', className: 'btn small', text: 'Не добавлять', onclick: function () { remember(); markDirty(); box.innerHTML = ''; } }),
+        h('button', { type: 'button', className: 'btn ghost small', text: 'Позже', onclick: function () { box.innerHTML = ''; } })
+      ])
+    ]));
+  }
+
+  function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
+
+  /* ---------- навигация ---------- */
+
+  function isStandard(id) {
+    return !!(state.defaults && state.defaults.sections.some(function (s) { return s.id === id; }));
+  }
+
+  function drawMenu() {
+    var menu = $('menu');
+    menu.innerHTML = '';
+    function item(key, label, off) {
+      return h('button', { type: 'button', className: 'menu-item' + (state.current === key ? ' active' : ''), 'data-view': key,
+        onclick: function () { go(key); } }, [label, off ? h('span', { className: 'off', text: '(скрыт)' }) : null]);
+    }
+    function group(label, items) {
+      var g = h('div', { className: 'menu-group' }, [h('span', { text: label })]);
+      items.forEach(function (i) { g.appendChild(i); });
+      menu.appendChild(g);
+    }
+    group('Страница', [item('hero', 'Шапка'), item('blocks', 'Блоки страницы')]);
+    group('Содержимое', state.data.sections.map(function (s) { return item('sec:' + s.id, s.title || 'Без названия', s.hidden); }));
+    group('Настройки', [item('seo', 'SEO и подвал'), item('backup', 'Копия и пароль')]);
+  }
+
+  function go(key) {
+    var v = $('view');
+    var secId = key.indexOf('sec:') === 0 ? key.slice(4) : null;
+    var sec = secId && state.data.sections.find(function (s) { return s.id === secId; });
+    if (secId && !sec) key = 'blocks';
+    state.current = key;
+    v.innerHTML = '';
+    if (sec) {
+      $('viewTitle').textContent = sec.title || 'Блок';
+      var refresh = function () { $('viewTitle').textContent = sec.title || 'Блок'; drawMenu(); };
+      v.appendChild(panel('Блок', sectionCommon(sec, refresh)));
+      (editors[sec.type] || editors.custom)(sec, v);
+    } else {
+      $('viewTitle').textContent = views[key].title;
+      views[key].draw(v);
+    }
+    drawMenu();
+    $('side').classList.remove('open');
+    $('menuBtn').setAttribute('aria-expanded', 'false');
+    window.scrollTo(0, 0);
+  }
+
+  /* ---------- данные ---------- */
+
+  // Достраиваем недостающие поля, чтобы формы не падали на старом содержимом
+  function normalize(d) {
+    d.hero = d.hero || {};
+    if (!d.hero.photo || typeof d.hero.photo !== 'object') d.hero.photo = { src: d.hero.photo || '', frame: { x: 50, y: 50, z: 1 } };
+    d.sections.forEach(function (s) {
+      if (['education', 'experience', 'courses', 'achievements', 'materials'].indexOf(s.type) >= 0 && !Array.isArray(s.items)) s.items = [];
+      if (s.type === 'gallery' && !Array.isArray(s.albums)) s.albums = [];
+      if ((s.type === 'about' || s.type === 'custom') && (!s.photo || typeof s.photo !== 'object')) s.photo = { src: '', frame: { x: 50, y: 50, z: 1 } };
+    });
+    return d;
+  }
+
+  function save() {
+    if (!state.data) return;
+    var btn = $('saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Сохраняю…';
+    state.data.updatedAt = new Date().toISOString();
+    if (state.defaults) state.data.knownDefaults = uniq((state.data.knownDefaults || []).concat(collectIds(state.data, []).filter(function (id) {
+      return defaultIds[id];
+    })));
+    var snapshot = JSON.stringify(state.data);
+    backend.save(JSON.parse(snapshot)).then(function () {
+      state.saved = snapshot;
+      markDirty();
+      toast(MODE === 'github' ? 'Сохранено. Сайт обновится примерно через минуту.' : 'Сохранено');
+    }).catch(function (e) {
+      toast('Не удалось сохранить: ' + (e.message || 'нет связи с сервером'), true);
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = 'Сохранить';
+    });
+  }
+
+  var defaultIds = {};
+
+  function openEditor() {
+    $('login').hidden = true;
+    $('shell').hidden = false;
+    $('modeLabel').textContent = backend.label;
+    $('view').innerHTML = '<p class="muted">Загрузка содержимого…</p>';
+    var defP = S.fetchDefault().catch(function () { return null; });
+    var curP = backend.load().catch(function (e) {
+      toast('Не удалось прочитать базу: ' + (e.message || '') + '. Показана резервная копия.', true);
+      return null;
+    });
+    return Promise.all([defP, curP]).then(function (r) {
+      state.defaults = r[0];
+      collectIds(r[0] || {}, []).forEach(function (id) { defaultIds[id] = true; });
+      var fromDb = r[1];
+      state.data = normalize(S.clone(fromDb || r[0]));
+      state.saved = fromDb ? JSON.stringify(state.data) : '';
+      if (!fromDb && MODE !== 'github') {
+        $('banners').appendChild(h('div', { className: 'banner info' }, [h('p', {
+          text: MODE === 'demo' ? 'Демо-режим: база не подключена. Правки сохранятся только в этом браузере.' :
+            'В базе пока нет содержимого. Проверьте тексты и нажмите «Сохранить», чтобы записать их в базу.'
+        })]));
+      }
+      if (!fromDb) state.saved = MODE === 'demo' ? JSON.stringify(state.data) : '';
+      drawMenu();
+      go('hero');
+      markDirty();
+      if (fromDb) checkMerge(false);
+      document.documentElement.setAttribute('data-ready', 'admin');
+    });
+  }
+
+  /* ---------- вход ---------- */
+
+  var loginMode = 'login';
+
+  function showLogin(kind) {
+    loginMode = kind || 'login';
+    $('shell').hidden = true;
+    $('login').hidden = false;
+    var msg = $('loginMsg');
+    msg.textContent = ''; msg.className = 'msg';
+    $('loginFields').hidden = MODE === 'github' || loginMode === 'recovery';
+    $('tokenFields').hidden = MODE !== 'github';
+    $('newPassFields').hidden = loginMode !== 'recovery';
+    $('forgotBtn').hidden = MODE !== 'supabase';
+    $('forgotBtn').textContent = loginMode === 'forgot' ? 'Вернуться ко входу' : 'Забыли пароль?';
+    $('loginPassword').parentNode.hidden = loginMode === 'forgot';
+    $('loginBtn').textContent = { login: 'Войти', forgot: 'Отправить ссылку', recovery: 'Сохранить новый пароль' }[loginMode];
+    $('loginHint').textContent = {
+      login: MODE === 'github' ? 'Вставьте токен GitHub с доступом к репозиторию сайта.' : 'Войдите, чтобы изменить содержимое сайта.',
+      forgot: 'Введите e-mail. Мы пришлём ссылку для смены пароля.',
+      recovery: 'Придумайте новый пароль.'
+    }[loginMode];
+    document.documentElement.setAttribute('data-ready', 'login');
+  }
+
+  $('forgotBtn').addEventListener('click', function () { showLogin(loginMode === 'forgot' ? 'login' : 'forgot'); });
+
+  $('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var msg = $('loginMsg');
+    var btn = $('loginBtn');
+    msg.textContent = ''; msg.className = 'msg';
+    var email = $('loginEmail').value.trim();
+    var job;
+    if (loginMode === 'forgot') {
+      if (!email) { msg.textContent = 'Введите e-mail'; return; }
+      job = backend.resetPassword(email).then(function () {
+        msg.textContent = 'Если такой адрес есть, письмо уже отправлено. Проверьте почту.'; msg.className = 'msg ok';
+      });
+    } else if (loginMode === 'recovery') {
+      var np = $('newPassword').value;
+      if (np.length < 8) { msg.textContent = 'Пароль должен быть не короче 8 символов'; return; }
+      job = backend.changePassword(np).then(function () {
+        history.replaceState(null, '', location.pathname);
+        return backend.checkAdmin();
+      }).then(function (ok) {
+        if (!ok) throw new Error('У этой учётной записи нет прав на управление сайтом');
+        toast('Пароль изменён');
+        return openEditor();
+      });
+    } else if (MODE === 'github') {
+      var token = $('loginToken').value;
+      if (!token.trim()) { msg.textContent = 'Вставьте токен'; return; }
+      job = backend.signIn(token, $('rememberToken').checked).then(openEditor);
+    } else {
+      var pass = $('loginPassword').value;
+      if (!email || !pass) { msg.textContent = 'Введите e-mail и пароль'; return; }
+      job = backend.signIn(email, pass).then(openEditor);
+    }
+    btn.disabled = true;
+    job.catch(function (err) {
+      msg.textContent = err && err.message ? err.message : 'Не получилось. Проверьте подключение к интернету.';
+      msg.className = 'msg';
+    }).then(function () { btn.disabled = false; });
+  });
+
+  $('logoutBtn').addEventListener('click', function () {
+    if (isDirty() && !confirm('Есть несохранённые правки. Всё равно выйти?')) return;
+    backend.signOut().then(function () {
+      state.data = null;
+      if (MODE === 'demo') location.href = 'index.html';
+      else showLogin('login');
+    });
+  });
+
+  $('saveBtn').addEventListener('click', save);
+  $('menuBtn').addEventListener('click', function () {
+    var open = $('side').classList.toggle('open');
+    $('menuBtn').setAttribute('aria-expanded', String(open));
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы')) {
+      e.preventDefault();
+      if (!$('shell').hidden) save();
+    }
+  });
+
+  window.addEventListener('beforeunload', function (e) {
+    if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  backend.start().then(function (ok) {
+    if (ok) return openEditor();
+    showLogin(/type=recovery/.test(location.hash) ? 'recovery' : 'login');
+  }).catch(function () { showLogin('login'); });
+
+  window.__admin = { state: state, mode: MODE };
+})();
