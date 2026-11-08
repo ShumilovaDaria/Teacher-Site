@@ -205,7 +205,7 @@
       (has(h.epigraph) ? '<blockquote class="epigraph"><p>«' + esc(h.epigraph) + '»</p>' + (has(h.epigraphAuthor) ? '<cite>' + esc(h.epigraphAuthor) + '</cite>' : '') + '</blockquote>' : '') +
       (has(h.text) ? '<div class="hero-text">' + S.paragraphs(h.text) + '</div>' : '') +
       (buttons.length ? '<div class="buttons">' + buttons.join('') + '</div>' : '') +
-      '</div>' + (photo ? '<div class="portrait"><div class="circle">' + img(h.photo, h.photoAlt || h.name) + '</div></div>' : '') + '</div>' +
+      '</div>' + (photo ? '<div class="portrait"' + (/^#[0-9a-f]{6}$/i.test(h.ringColor || '') ? ' style="--ring:' + h.ringColor + '"' : '') + '><div class="circle">' + img(h.photo, h.photoAlt || h.name) + '</div></div>' : '') + '</div>' +
       (cardList.length ? '<div class="hero-cards">' + cardList.map(function (c) {
         return '<div class="hero-card">' + (has(c.title) ? '<h3>' + esc(c.title) + '</h3>' : '') + (has(c.text) ? '<p>' + esc(c.text) + '</p>' : '') + '</div>';
       }).join('') + '</div>' : '') + '</div></header>';

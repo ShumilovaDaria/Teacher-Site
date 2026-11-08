@@ -83,13 +83,9 @@ button { font: inherit; color: inherit; }
 .btn.gold { background: var(--gold); border-color: var(--gold); color: var(--navy); }
 
 .portrait { position: relative; width: 100%; max-width: 420px; justify-self: end; aspect-ratio: 1; }
-.portrait::before {
-  content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--sky);
-  transform: translate(18px, 18px);
-}
 .portrait .circle {
   position: absolute; inset: 0; border-radius: 50%; overflow: hidden;
-  border: 6px solid var(--gold); background: var(--beige);
+  border: 6px solid var(--ring, var(--gold)); background: var(--beige);
 }
 .frame-img { width: 100%; height: 100%; object-fit: cover; }
 
@@ -258,7 +254,6 @@ a.contact:hover { background: #34497f; }
   .hero { padding: 32px 0 48px; }
   .hero-grid, .about-grid, .custom-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .portrait { order: -1; max-width: 250px; justify-self: start; }
-  .portrait::before { transform: translate(10px, 10px); }
   .about-photo { max-width: 240px; justify-self: start; order: -1; }
   .hero-cards, .grid-2, .ach-grid { grid-template-columns: minmax(0, 1fr); }
   .hero-cards { margin-top: 36px; }

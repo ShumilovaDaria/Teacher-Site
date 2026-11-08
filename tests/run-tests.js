@@ -271,6 +271,7 @@ test('Защита от XSS', async (b) => {
   st.items[1].link = 'JaVaScRiPt:alert(1)';
   content.hero.buttons[0].href = 'data:text/html,<script>alert(1)<\/script>';
   content.hero.photo.src = '" onerror="window.__xss=4';
+  content.hero.ringColor = 'red" onmouseover="window.__xss=5';
   const { page, context } = await newPage(b, { content });
   await openSite(page);
   await page.waitForTimeout(500);
@@ -374,6 +375,7 @@ test('Полный сценарий: правка текста, загрузка
   await page.mouse.up();
   await page.locator('#cropZoom').fill('1.5');
   await page.click('#cropOk');
+  await page.locator('[data-field="ring-color"]').fill('#3366cc');
   await page.keyboard.press('Control+s');
   await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
 
@@ -382,6 +384,7 @@ test('Полный сценарий: правка текста, загрузка
   assert(hero.name === 'Шумилова Дарья Александровна (тест)', 'имя не сохранено');
   assert(hero.photo.src === SB + '/storage/v1/object/public/media/' + key, 'адрес фото ' + hero.photo.src);
   assert(hero.photo.frame.z === 1.5 && hero.photo.frame.x < 50 && hero.photo.frame.y < 50, 'кадр ' + JSON.stringify(hero.photo.frame));
+  assert(hero.ringColor === '#3366cc', 'цвет окантовки ' + hero.ringColor);
 
   const site = await context.newPage();
   await openSite(site);
@@ -389,6 +392,8 @@ test('Полный сценарий: правка текста, загрузка
   const style = await site.getAttribute('.portrait img', 'style');
   assert(style.includes('scale(1.5)'), 'кадр не применён: ' + style);
   assert(await site.evaluate(() => document.querySelector('.portrait img').complete && document.querySelector('.portrait img').naturalWidth > 0), 'фото не показалось');
+  const ring = await site.evaluate(() => getComputedStyle(document.querySelector('.portrait .circle')).borderTopColor);
+  assert(ring === 'rgb(51, 102, 204)', 'цвет окантовки на сайте ' + ring);
   await context.close();
 });
 

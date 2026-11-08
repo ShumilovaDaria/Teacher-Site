@@ -435,7 +435,40 @@
     return d;
   }
 
-  var BG_OPTIONS = [['cream', 'Кремовый'], ['sky', 'Небесно-голубой'], ['powder', 'Пудрово-розовый'], ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий']];
+  // Цвет в формате #rrggbb: палитра RGB, код вручную и цвета сайта
+  var RING_DEFAULT = '#c39a2b';
+  var SWATCHES = [['#c39a2b', 'Золото'], ['#1c2a4f', 'Тёмно-синий'], ['#8cc4ec', 'Небесно-голубой'], ['#f5b6c7', 'Пудрово-розовый'], ['#e9d2aa', 'Тёплый беж'], ['#ffffff', 'Белый']];
+
+  function colorField(obj, key, label, def, onChange) {
+    var valid = function (v) { return /^#[0-9a-f]{6}$/i.test(v || ''); };
+    var picker = h('input', { type: 'color', 'aria-label': label, 'data-field': 'ring-color' });
+    var hex = h('input', { type: 'text', maxlength: '7', placeholder: def, 'aria-label': 'Код цвета', style: 'max-width:110px;flex:none' });
+    function set(v, fromHex) {
+      if (!valid(v)) return;
+      obj[key] = v.toLowerCase();
+      picker.value = obj[key];
+      if (!fromHex) hex.value = obj[key];
+      markDirty();
+      if (onChange) onChange(obj[key]);
+    }
+    picker.value = valid(obj[key]) ? obj[key] : def;
+    hex.value = picker.value;
+    picker.addEventListener('input', function () { set(picker.value); });
+    hex.addEventListener('input', function () {
+      var v = hex.value.trim();
+      if (v && v[0] !== '#') v = '#' + v;
+      set(v, true);
+    });
+    var swatches = h('div', { className: 'swatches' }, SWATCHES.map(function (s) {
+      return h('button', { type: 'button', className: 'swatch', title: s[1], 'aria-label': s[1], style: 'background:' + s[0], onclick: function () { set(s[0]); } });
+    }));
+    return h('div', { className: 'field' }, [h('span', { text: label }),
+      h('div', { className: 'inline color-row' }, [picker, hex, swatches,
+        h('button', { type: 'button', className: 'btn small ghost', text: 'Как было', onclick: function () { set(def); } })]),
+      h('small', { className: 'hint', text: 'Нажмите на квадрат, чтобы выбрать любой цвет, или впишите код вида #c39a2b.' })]);
+  }
+
+  var BG_OPTIONS =[['cream', 'Кремовый'], ['sky', 'Небесно-голубой'], ['powder', 'Пудрово-розовый'], ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий']];
 
   // Одна картинка: { src, frame }
   function imageField(owner, key, label, shape) {
@@ -798,7 +831,16 @@
           textField(hr, 'epigraphAuthor', 'Автор эпиграфа'),
           textField(hr, 'text', 'Короткий текст', { rows: 3 })
         ]));
-        v.appendChild(panel('Фото', [imageField(hr, 'photo', 'Фото в круге', 'circle'), more([textField(hr, 'photoAlt', 'Описание фото для незрячих')])]));
+        var photoPanel = panel('Фото', [imageField(hr, 'photo', 'Фото в круге', 'circle')]);
+        function paintRing() {
+          var t = photoPanel.querySelector('.thumb.circle');
+          if (t) { t.style.borderColor = hr.ringColor || RING_DEFAULT; t.style.borderWidth = '4px'; }
+        }
+        photoPanel.appendChild(colorField(hr, 'ringColor', 'Цвет окантовки фото', RING_DEFAULT, paintRing));
+        photoPanel.appendChild(more([textField(hr, 'photoAlt', 'Описание фото для незрячих')]));
+        new MutationObserver(paintRing).observe(photoPanel, { childList: true, subtree: true });
+        paintRing();
+        v.appendChild(photoPanel);
         v.appendChild(panel('Кнопки', [listField(hr.buttons, {
           prefix: 'btn', addLabel: 'Добавить кнопку',
           title: function (b) { return b.label; },
