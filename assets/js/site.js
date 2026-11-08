@@ -394,7 +394,7 @@
     }
   }
 
-  // Блоки плавно появляются, когда доходят до экрана
+  // Блоки плавно появляются каждый раз, когда доходят до экрана
   var REVEAL = '.hero-grid > *, .hero-card, .section-head, .chips, .albums, .about-text, .about-photo, .card, .tl-item, ' +
     '.album-text, .media-tile, .empty-album, .remember, .contact, .custom-photo, .note';
 
@@ -403,13 +403,23 @@
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     var items = root.querySelectorAll(REVEAL);
     var io = new IntersectionObserver(function (entries) {
-      // элементы, вошедшие в экран одновременно, появляются друг за другом
-      entries.filter(function (e) { return e.isIntersecting; }).forEach(function (e, i) {
-        e.target.style.setProperty('--d', Math.min(i, 5) * 90 + 'ms');
-        e.target.classList.add('in');
-        io.unobserve(e.target);
+      var n = 0;
+      entries.forEach(function (e) {
+        var el = e.target;
+        if (e.isIntersecting && e.intersectionRatio >= 0.1) {
+          if (el.classList.contains('in')) return;
+          // элементы, вошедшие в экран одновременно, появляются друг за другом
+          el.style.setProperty('--d', Math.min(n++, 5) * 90 + 'ms');
+          el.classList.add('in');
+        } else if (!e.isIntersecting) {
+          // элемент целиком ушёл за экран: прячем, чтобы при возврате он появился снова;
+          // ушедший вверх потом выезжает сверху, ушедший вниз снизу
+          el.style.setProperty('--d', '0ms');
+          el.setAttribute('data-from', e.boundingClientRect.top < 0 ? 'top' : 'bottom');
+          el.classList.remove('in');
+        }
       });
-    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    }, { threshold: [0, 0.1] });
     Array.prototype.forEach.call(items, function (el) {
       el.classList.add('rv');
       io.observe(el);
