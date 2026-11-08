@@ -437,38 +437,50 @@
 
   // Цвет в формате #rrggbb: палитра RGB, код вручную и цвета сайта
   var RING_DEFAULT = '#c39a2b';
-  var SWATCHES = [['#c39a2b', 'Золото'], ['#1c2a4f', 'Тёмно-синий'], ['#8cc4ec', 'Небесно-голубой'], ['#f5b6c7', 'Пудрово-розовый'], ['#e9d2aa', 'Тёплый беж'], ['#ffffff', 'Белый']];
+  // Цвета сайта: [что сохраняем, цвет, название]
+  var RING_SWATCHES = [['#c39a2b', '#c39a2b', 'Золото'], ['#1c2a4f', '#1c2a4f', 'Тёмно-синий'], ['#8cc4ec', '#8cc4ec', 'Небесно-голубой'],
+    ['#f5b6c7', '#f5b6c7', 'Пудрово-розовый'], ['#e9d2aa', '#e9d2aa', 'Тёплый беж'], ['#ffffff', '#ffffff', 'Белый']];
+  var BG_SWATCHES = [['cream', 'Кремовый'], ['sky', 'Небесно-голубой'], ['powder', 'Пудрово-розовый'], ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий']]
+    .map(function (b) { return [b[0], S.BG_PRESETS[b[0]], b[1]]; });
 
-  function colorField(obj, key, label, def, onChange) {
-    var valid = function (v) { return /^#[0-9a-f]{6}$/i.test(v || ''); };
-    var picker = h('input', { type: 'color', 'aria-label': label, 'data-field': 'ring-color' });
-    var hex = h('input', { type: 'text', maxlength: '7', placeholder: def, 'aria-label': 'Код цвета', style: 'max-width:110px;flex:none' });
-    function set(v, fromHex) {
-      if (!valid(v)) return;
-      obj[key] = v.toLowerCase();
-      picker.value = obj[key];
-      if (!fromHex) hex.value = obj[key];
-      markDirty();
-      if (onChange) onChange(obj[key]);
+  // Выбор цвета: кнопки цветов сайта, палитра RGB и код #rrggbb
+  function colorField(obj, key, label, def, swatchList, opts) {
+    opts = opts || {};
+    var toHex = function (v) {
+      var s = swatchList.find(function (x) { return x[0] === v; });
+      return s ? s[1] : (S.isHex(v) ? v.toLowerCase() : null);
+    };
+    var picker = h('input', { type: 'color', 'aria-label': label, 'data-field': opts.name || null });
+    var hex = h('input', { type: 'text', maxlength: '7', placeholder: '#rrggbb', 'aria-label': 'Код цвета' });
+    var buttons = [];
+    function paint() {
+      var cur = obj[key] || def;
+      var hx = toHex(cur) || toHex(def);
+      picker.value = hx;
+      if (document.activeElement !== hex) hex.value = hx;
+      buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b._value === cur || b._hex === cur)); });
+      if (opts.onChange) opts.onChange(hx);
     }
-    picker.value = valid(obj[key]) ? obj[key] : def;
-    hex.value = picker.value;
-    picker.addEventListener('input', function () { set(picker.value); });
+    function set(v) { obj[key] = v; markDirty(); paint(); }
+    picker.addEventListener('input', function () { set(picker.value.toLowerCase()); });
     hex.addEventListener('input', function () {
       var v = hex.value.trim();
       if (v && v[0] !== '#') v = '#' + v;
-      set(v, true);
+      if (S.isHex(v)) set(v.toLowerCase());
     });
-    var swatches = h('div', { className: 'swatches' }, SWATCHES.map(function (s) {
-      return h('button', { type: 'button', className: 'swatch', title: s[1], 'aria-label': s[1], style: 'background:' + s[0], onclick: function () { set(s[0]); } });
+    var swatches = h('div', { className: 'swatches' }, swatchList.map(function (s) {
+      var b = h('button', { type: 'button', className: 'swatch', title: s[2], 'aria-label': s[2], style: 'background:' + s[1], onclick: function () { set(s[0]); } });
+      b._value = s[0]; b._hex = s[1];
+      buttons.push(b);
+      return b;
     }));
-    return h('div', { className: 'field' }, [h('span', { text: label }),
-      h('div', { className: 'inline color-row' }, [picker, hex, swatches,
-        h('button', { type: 'button', className: 'btn small ghost', text: 'Как было', onclick: function () { set(def); } })]),
-      h('small', { className: 'hint', text: 'Нажмите на квадрат, чтобы выбрать любой цвет, или впишите код вида #c39a2b.' })]);
+    var wrap = h('div', { className: 'field' }, [h('span', { text: label }),
+      h('div', { className: 'inline color-row' }, [swatches, picker, hex]),
+      h('small', { className: 'hint', text: 'Кружки: цвета сайта. Квадрат: любой цвет из палитры RGB. Можно вписать код вида #c39a2b.' })]);
+    paint();
+    return wrap;
   }
 
-  var BG_OPTIONS =[['cream', 'Кремовый'], ['sky', 'Небесно-голубой'], ['powder', 'Пудрово-розовый'], ['beige', 'Тёплый беж'], ['navy', 'Тёмно-синий']];
 
   // Одна картинка: { src, frame }
   function imageField(owner, key, label, shape) {
@@ -674,9 +686,9 @@
       checkField(sec, 'hidden', 'Показывать блок на сайте', true, refreshMenu),
       more([
         textField(sec, 'menuLabel', 'Название в меню', { hint: 'Если пусто, берётся заголовок', onInput: refreshMenu }),
-        menuCheck(sec),
-        selectField(sec, 'bg', 'Фон блока', BG_OPTIONS)
-      ])
+        menuCheck(sec)
+      ]),
+      colorField(sec, 'bg', 'Фон блока', 'cream', BG_SWATCHES, { name: 'section-bg' })
     ];
   }
 
@@ -829,14 +841,15 @@
           textField(hr, 'role', 'Должность'),
           textField(hr, 'epigraph', 'Эпиграф', { rows: 3, hint: 'Кавычки «» добавятся сами.' }),
           textField(hr, 'epigraphAuthor', 'Автор эпиграфа'),
-          textField(hr, 'text', 'Короткий текст', { rows: 3 })
+          textField(hr, 'text', 'Короткий текст', { rows: 3 }),
+          colorField(hr, 'bg', 'Фон шапки', 'cream', BG_SWATCHES, { name: 'hero-bg' })
         ]));
         var photoPanel = panel('Фото', [imageField(hr, 'photo', 'Фото в круге', 'circle')]);
         function paintRing() {
           var t = photoPanel.querySelector('.thumb.circle');
           if (t) { t.style.borderColor = hr.ringColor || RING_DEFAULT; t.style.borderWidth = '4px'; }
         }
-        photoPanel.appendChild(colorField(hr, 'ringColor', 'Цвет окантовки фото', RING_DEFAULT, paintRing));
+        photoPanel.appendChild(colorField(hr, 'ringColor', 'Цвет окантовки фото', RING_DEFAULT, RING_SWATCHES, { name: 'ring-color', onChange: paintRing }));
         photoPanel.appendChild(more([textField(hr, 'photoAlt', 'Описание фото для незрячих')]));
         new MutationObserver(paintRing).observe(photoPanel, { childList: true, subtree: true });
         paintRing();
@@ -908,7 +921,7 @@
     var custom = { title: '', bg: 'cream', menu: true };
     var addPanel = panel('Новый блок', [
       textField(custom, 'title', 'Заголовок', { name: 'new-block-title' }),
-      selectField(custom, 'bg', 'Фон', BG_OPTIONS),
+      colorField(custom, 'bg', 'Фон', 'cream', BG_SWATCHES),
       checkField(custom, 'menu', 'Добавить пункт в меню'),
       h('button', { type: 'button', className: 'btn primary', text: 'Создать блок', onclick: function () {
         if (!custom.title.trim()) { toast('Введите заголовок блока', true); return; }

@@ -272,6 +272,8 @@ test('Защита от XSS', async (b) => {
   content.hero.buttons[0].href = 'data:text/html,<script>alert(1)<\/script>';
   content.hero.photo.src = '" onerror="window.__xss=4';
   content.hero.ringColor = 'red" onmouseover="window.__xss=5';
+  content.hero.bg = '#fff" onmouseover="window.__xss=6';
+  content.sections[0].bg = 'red;background:url(javascript:alert(1))';
   const { page, context } = await newPage(b, { content });
   await openSite(page);
   await page.waitForTimeout(500);
@@ -432,6 +434,11 @@ test('Блоки страницы: скрыть, переставить, уда�
   await page.fill('[data-field="new-block-title"]', 'Кружок «Умелые ручки»');
   await page.click('button:has-text("Создать блок")');
   await page.fill('.panel:has(h2:text-is("Содержимое")) textarea >> nth=0', 'Занятия по средам.');
+  await page.locator('[data-field="section-bg"]').fill('#204030');
+  await menu(page, 'Образование');
+  await page.click('.panel:has(h2:text-is("Блок")) .swatch[title="Пудрово-розовый"]');
+  await menu(page, 'Шапка');
+  await page.locator('[data-field="hero-bg"]').fill('#fff2cc');
   await page.click('#saveBtn');
   await page.waitForFunction(() => document.getElementById('status').textContent.includes('сохранено'));
 
@@ -446,6 +453,16 @@ test('Блоки страницы: скрыть, переставить, уда�
   const custom = site.locator('section[data-type="custom"]');
   assert((await custom.textContent()).includes('Занятия по средам.'), 'нет нового блока');
   assert(await site.$('.nav a:has-text("Кружок")'), 'нет пункта меню');
+  const colors = await site.evaluate(() => {
+    const c = document.querySelector('section[data-type="custom"]');
+    return [getComputedStyle(c).backgroundColor, getComputedStyle(c.querySelector('h2')).color,
+      document.getElementById('education').className, getComputedStyle(document.querySelector('.hero')).backgroundColor];
+  });
+  assert(colors[0] === 'rgb(32, 64, 48)', 'свой фон блока ' + colors[0]);
+  assert(colors[1] === 'rgb(255, 255, 255)', 'на тёмном фоне заголовок не белый ' + colors[1]);
+  assert(colors[2].includes('bg-powder'), 'пресет фона ' + colors[2]);
+  assert(colors[3] === 'rgb(255, 242, 204)', 'фон шапки ' + colors[3]);
+  assert(db.content.sections.find((s) => s.id === 'education').bg === 'powder', 'пресет сохранён не именем');
   await context.close();
 });
 

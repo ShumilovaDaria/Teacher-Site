@@ -108,6 +108,8 @@ details.more > summary { cursor: pointer; font-weight: 700; color: var(--sky-dee
 .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
 .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
 .swatch:hover { border-color: var(--navy); }
+.swatch[aria-pressed="true"] { border-color: var(--navy); box-shadow: 0 0 0 2px #fff inset; outline: 2px solid var(--navy); outline-offset: 1px; }
+.color-row input[type="text"] { flex: none; width: 110px; min-width: 0; }
 
 /* списки */
 .list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 12px; }

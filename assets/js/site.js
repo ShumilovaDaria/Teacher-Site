@@ -4,7 +4,6 @@
 
   var S = window.Site;
   var esc = S.esc;
-  var BGS = ['cream', 'sky', 'powder', 'beige', 'navy'];
 
   function visible(list) {
     return (Array.isArray(list) ? list : []).filter(function (it) { return it && !it.hidden; });
@@ -198,7 +197,8 @@
     var photo = h.photo && S.safeMediaUrl(h.photo.src);
     var buttons = visible(h.buttons).map(function (b, i) { return link(b.href, b.label, i === 0 ? 'btn' : 'btn alt'); }).filter(Boolean);
     var cardList = visible(cards).filter(function (c) { return has(c.title) || has(c.text); });
-    return '<header class="hero" id="top"><div class="wrap"><div class="hero-grid"><div>' +
+    var bg = S.bgStyle(h.bg, 'cream');
+    return '<header class="hero ' + bg.cls + '"' + (bg.style ? ' style="' + bg.style + '"' : '') + ' id="top"><div class="wrap"><div class="hero-grid"><div>' +
       (has(h.kicker) ? '<div class="hero-kicker">' + esc(h.kicker) + '</div>' : '') +
       '<h1>' + esc(h.name) + '</h1>' +
       (has(h.role) ? '<div class="hero-role">' + esc(h.role) + '</div>' : '') +
@@ -330,8 +330,8 @@
       var inner = fn(sec, ctx);
       if (!inner) return;
       var id = anchorId(sec.id);
-      var bg = BGS.indexOf(sec.bg) >= 0 ? sec.bg : (i % 2 ? 'beige' : 'cream');
-      blocks.push('<section class="section bg-' + bg + '" id="' + id + '" data-type="' + esc(sec.type) + '"><div class="wrap">' + inner + '</div></section>');
+      var bg = S.bgStyle(sec.bg, i % 2 ? 'beige' : 'cream');
+      blocks.push('<section class="section ' + bg.cls + '"' + (bg.style ? ' style="' + bg.style + '"' : '') + ' id="' + id + '" data-type="' + esc(sec.type) + '"><div class="wrap">' + inner + '</div></section>');
       if (sec.menu !== false) nav.push('<a href="#' + id + '">' + esc(sec.menuLabel || sec.title) + '</a>');
     });
 

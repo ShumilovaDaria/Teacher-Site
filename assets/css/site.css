@@ -103,7 +103,16 @@ button { font: inherit; color: inherit; }
 .bg-sky { background: var(--sky); }
 .bg-powder { background: var(--powder); }
 .bg-beige { background: var(--beige); }
-.bg-navy { background: var(--navy); color: #fff; }
+.bg-navy { background: var(--navy); }
+/* тёмный фон (тёмно-синий или свой тёмный цвет): светлый текст */
+.is-dark { color: #fff; }
+.is-dark .section-head h2, .is-dark.hero h1, .is-dark .hero-role { color: #fff; }
+.is-dark .hero-kicker { color: var(--gold-light); }
+.is-dark .btn.alt { color: #fff; border-color: #fff; }
+.is-dark .btn.alt:hover { background: #fff; color: var(--navy); }
+.is-dark .btn { border-color: #fff; }
+.hero-card, .epigraph, .goal, .empty-album, .chip:not([aria-pressed="true"]) { color: var(--ink); }
+.is-dark .chip:not([aria-pressed="true"]) { background: var(--paper); }
 .section-head { margin-bottom: 32px; max-width: 760px; }
 .section-head h2 { font-size: clamp(30px, 4vw, 44px); }
 .section-head h2::after { content: ""; display: block; width: 64px; height: 4px; background: var(--gold); margin-top: 14px; border-radius: 2px; }
@@ -205,7 +214,6 @@ button { font: inherit; color: inherit; }
 a.contact:hover { background: #34497f; }
 .contact .k { display: block; font-size: 14px; font-weight: 700; color: var(--gold-light); }
 .contact .v { display: block; margin-top: 4px; font-size: 17px; font-weight: 700; }
-.bg-navy .section-head h2 { color: #fff; }
 
 /* свой блок */
 .custom-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 40px; align-items: start; }

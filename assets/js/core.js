@@ -143,6 +143,26 @@
     return fetchDefault().then(function (data) { return { data: data, source: 'default' }; });
   }
 
+  // Фон блока: имя цвета сайта или свой цвет #rrggbb
+  var BG_PRESETS = { cream: '#fbf5ea', sky: '#8cc4ec', powder: '#f5b6c7', beige: '#e9d2aa', navy: '#1c2a4f' };
+
+  function isHex(v) { return /^#[0-9a-f]{6}$/i.test(v || ''); }
+
+  function isDarkColor(hex) {
+    var n = parseInt(hex.slice(1), 16);
+    var r = n >> 16 & 255, g = n >> 8 & 255, b = n & 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 150;
+  }
+
+  // Возвращает класс и стиль для фона; на тёмном фоне текст белый
+  function bgStyle(bg, fallback) {
+    if (isHex(bg)) {
+      return { cls: 'bg-custom' + (isDarkColor(bg) ? ' is-dark' : ''), style: 'background:' + bg.toLowerCase() };
+    }
+    var name = BG_PRESETS[bg] ? bg : fallback;
+    return { cls: 'bg-' + name + (name === 'navy' ? ' is-dark' : ''), style: '' };
+  }
+
   // Стандартные блоки сайта
   var SECTION_TYPES = {
     about: 'Обо мне',
@@ -176,6 +196,10 @@
     writeDemo: writeDemo,
     loadContent: loadContent,
     SECTION_TYPES: SECTION_TYPES,
+    BG_PRESETS: BG_PRESETS,
+    isHex: isHex,
+    isDarkColor: isDarkColor,
+    bgStyle: bgStyle,
     DEMO_KEY: DEMO_KEY
   };
 })(window);
